@@ -976,7 +976,7 @@ fn parse_datetime(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
     if year < 0 {
         return ParseError(c.line, c.col, "invalid year in date-time")
     }
-    result = result + "{year}"
+    result = result + pad4(year)
     // Check for date-month separator
     let sep = cursor_peek(c)
     if sep != "-" {
@@ -1028,32 +1028,38 @@ fn parse_datetime(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
             return ParseError(c.line, c.col, "invalid minute in date-time")
         }
         result = result + pad2(minute)
-        // Optional seconds
+        // Required seconds
         let sep4 = cursor_peek(c)
-        if sep4 == ":" {
-            result = result + ":"
+        if sep4 != ":" {
+            return ParseError(c.line, c.col, "missing : in date-time")
+        }
+        result = result + ":"
+        cursor_advance(mut c)
+        // Parse second (00-60, leap second)
+        let second = parse_digits_n(mut c, 2)
+        if second < 0 || second > 60 {
+            return ParseError(c.line, c.col, "invalid second in date-time")
+        }
+        result = result + pad2(second)
+        // Optional fractional seconds
+        let frac = cursor_peek(c)
+        if frac == "." {
+            result = result + "."
             cursor_advance(mut c)
-            // Parse second (00-60, leap second)
-            let second = parse_digits_n(mut c, 2)
-            if second < 0 || second > 60 {
-                return ParseError(c.line, c.col, "invalid second in date-time")
-            }
-            result = result + pad2(second)
-            // Optional fractional seconds
-            let frac = cursor_peek(c)
-            if frac == "." {
-                result = result + "."
-                cursor_advance(mut c)
-                // Parse fractional digits
-                while !cursor_at_end(c) {
-                    let ch = cursor_peek(c)
-                    if ch >= "0" && ch <= "9" {
-                        result = result + ch
-                        cursor_advance(mut c)
-                    } else {
-                        break
-                    }
+            // Parse fractional digits (must have at least one)
+            var has_frac_digit = false
+            while !cursor_at_end(c) {
+                let ch = cursor_peek(c)
+                if ch >= "0" && ch <= "9" {
+                    result = result + ch
+                    cursor_advance(mut c)
+                    has_frac_digit = true
+                } else {
+                    break
                 }
+            }
+            if !has_frac_digit {
+                return ParseError(c.line, c.col, "no digits after . in date-time")
             }
         }
         // Check for timezone
@@ -1110,32 +1116,38 @@ fn parse_datetime(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
                 return ParseError(c.line, c.col, "invalid minute in date-time")
             }
             result = result + pad2(minute)
-            // Optional seconds
+            // Required seconds
             let sep4 = cursor_peek(c)
-            if sep4 == ":" {
-                result = result + ":"
+            if sep4 != ":" {
+                return ParseError(c.line, c.col, "missing : in date-time")
+            }
+            result = result + ":"
+            cursor_advance(mut c)
+            // Parse second (00-60, leap second)
+            let second = parse_digits_n(mut c, 2)
+            if second < 0 || second > 60 {
+                return ParseError(c.line, c.col, "invalid second in date-time")
+            }
+            result = result + pad2(second)
+            // Optional fractional seconds
+            let frac = cursor_peek(c)
+            if frac == "." {
+                result = result + "."
                 cursor_advance(mut c)
-                // Parse second (00-60, leap second)
-                let second = parse_digits_n(mut c, 2)
-                if second < 0 || second > 60 {
-                    return ParseError(c.line, c.col, "invalid second in date-time")
-                }
-                result = result + pad2(second)
-                // Optional fractional seconds
-                let frac = cursor_peek(c)
-                if frac == "." {
-                    result = result + "."
-                    cursor_advance(mut c)
-                    // Parse fractional digits
-                    while !cursor_at_end(c) {
-                        let ch = cursor_peek(c)
-                        if ch >= "0" && ch <= "9" {
-                            result = result + ch
-                            cursor_advance(mut c)
-                        } else {
-                            break
-                        }
+                // Parse fractional digits (must have at least one)
+                var has_frac_digit = false
+                while !cursor_at_end(c) {
+                    let ch = cursor_peek(c)
+                    if ch >= "0" && ch <= "9" {
+                        result = result + ch
+                        cursor_advance(mut c)
+                        has_frac_digit = true
+                    } else {
+                        break
                     }
+                }
+                if !has_frac_digit {
+                    return ParseError(c.line, c.col, "no digits after . in date-time")
                 }
             }
             // Check for timezone
@@ -1177,7 +1189,7 @@ fn parse_datetime(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
     // Validate day for month
     let m = month
     let d = day
-    let max_day = days_in_month(m)
+    let max_day = days_in_month(year, m)
     if d > max_day {
         return ParseError(c.line, c.col, "invalid day for month in date-time")
     }
@@ -1209,15 +1221,45 @@ fn pad2(n: int) -> str {
     }
 }
 
-/// Return the maximum day for a month (1-indexed).
-fn days_in_month(month: int) -> int {
+/// Pad to 4 digits.
+fn pad4(n: int) -> str {
+    if n < 10 {
+        "000{n}"
+    } else if n < 100 {
+        "00{n}"
+    } else if n < 1000 {
+        "0{n}"
+    } else {
+        "{n}"
+    }
+}
+
+/// Return the maximum day for a month (1-indexed), given the year.
+fn days_in_month(year: int, month: int) -> int {
     if month == 2 {
-        return 29 // We accept leap years; validation is done elsewhere
+        if is_leap_year(year) {
+            return 29
+        }
+        return 28
     }
     if month == 4 || month == 6 || month == 9 || month == 11 {
         return 30
     }
     31
+}
+
+/// Check if a year is a leap year (Gregorian calendar).
+fn is_leap_year(year: int) -> bool {
+    if year % 400 == 0 {
+        return true
+    }
+    if year % 100 == 0 {
+        return false
+    }
+    if year % 4 == 0 {
+        return true
+    }
+    false
 }
 
 /// Parse a local time. Returns the normalized text.
@@ -1242,32 +1284,38 @@ fn parse_local_time(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
         return ParseError(c.line, c.col, "invalid minute in local time")
     }
     result = result + pad2(minute)
-    // Optional seconds
+    // Required seconds
     let sep2 = cursor_peek(c)
-    if sep2 == ":" {
-        result = result + ":"
+    if sep2 != ":" {
+        return ParseError(c.line, c.col, "missing : in local time")
+    }
+    result = result + ":"
+    cursor_advance(mut c)
+    // Parse second (00-60, leap second)
+    let second = parse_digits_n(mut c, 2)
+    if second < 0 || second > 60 {
+        return ParseError(c.line, c.col, "invalid second in local time")
+    }
+    result = result + pad2(second)
+    // Optional fractional seconds
+    let frac = cursor_peek(c)
+    if frac == "." {
+        result = result + "."
         cursor_advance(mut c)
-        // Parse second (00-60, leap second)
-        let second = parse_digits_n(mut c, 2)
-        if second < 0 || second > 60 {
-            return ParseError(c.line, c.col, "invalid second in local time")
-        }
-        result = result + pad2(second)
-        // Optional fractional seconds
-        let frac = cursor_peek(c)
-        if frac == "." {
-            result = result + "."
-            cursor_advance(mut c)
-            // Parse fractional digits
-            while !cursor_at_end(c) {
-                let ch = cursor_peek(c)
-                if ch >= "0" && ch <= "9" {
-                    result = result + ch
-                    cursor_advance(mut c)
-                } else {
-                    break
-                }
+        // Parse fractional digits (must have at least one)
+        var has_frac_digit = false
+        while !cursor_at_end(c) {
+            let ch = cursor_peek(c)
+            if ch >= "0" && ch <= "9" {
+                result = result + ch
+                cursor_advance(mut c)
+                has_frac_digit = true
+            } else {
+                break
             }
+        }
+        if !has_frac_digit {
+            return ParseError(c.line, c.col, "no digits after . in local time")
         }
     }
     result
@@ -1281,7 +1329,7 @@ fn parse_local_date(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
     if year < 0 {
         return ParseError(c.line, c.col, "invalid year in local date")
     }
-    result = result + "{year}"
+    result = result + pad4(year)
     // Check for - separator
     let sep = cursor_peek(c)
     if sep != "-" {
@@ -1309,7 +1357,7 @@ fn parse_local_date(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
     }
     result = result + pad2(day)
     // Validate day for month
-    let max_day = days_in_month(month)
+    let max_day = days_in_month(year, month)
     if day > max_day {
         return ParseError(c.line, c.col, "invalid day for month in local date")
     }

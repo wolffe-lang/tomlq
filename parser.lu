@@ -10,6 +10,28 @@ struct Parser {
 }
 
 /// Create a new parser.
+/// Check if a datetime string has a timezone offset.
+fn has_timezone(s: str) -> bool {
+    if s.len == 0 {
+        return false
+    }
+    let last = s.get(s.len - 1..) else ""
+    if last == "Z" {
+        return true
+    }
+    // Check for +HH:MM or -HH:MM at the end
+    if s.len >= 6 {
+        let tail = s.get(s.len - 6..) else ""
+        if tail.len >= 6 {
+            let sign = tail.get(0..1) else ""
+            if sign == "+" || sign == "-" {
+                return true
+            }
+        }
+    }
+    false
+}
+
 fn parser_init(text: str) -> Parser {
     let c = cursor_init(text)
     var arena = List[Node]()
@@ -456,7 +478,10 @@ fn parse_value(mut p: Parser) -> int ! {ParseError(int, int, str)} {
     }
     if kind == "datetime" {
         let v = parse_datetime(mut p.c)?
-        return datetime_node(mut p.arena, v, 6)
+        // Check if it has an offset (ends with Z, +HH:MM, or -HH:MM)
+        let has_offset = has_timezone(v)
+        let kind = if has_offset { 6 } else { 7 }
+        return datetime_node(mut p.arena, v, kind)
     }
     if kind == "local-date" {
         let v = parse_local_date(mut p.c)?

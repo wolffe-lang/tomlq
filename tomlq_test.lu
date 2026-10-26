@@ -314,3 +314,160 @@ fn test_floats_as_values() -> !int {
     }
     bad
 }
+
+fn test_datetime_kinds() -> !int {
+    var bad = 0
+    // 1979-05-27T07:32:00Z → datetime (kind 6)
+    bad = bad +
+        expect(
+            "zulu",
+            tagged_of("a = 1979-05-27T07:32:00Z"),
+            "{{\"a\":{{\"type\":\"datetime\",\"value\":\"1979-05-27T07:32:00Z\"}}}}",
+        )
+    // 1979-05-27T07:32:00-07:00 → datetime (kind 6)
+    bad = bad +
+        expect(
+            "offset",
+            tagged_of("a = 1979-05-27T07:32:00-07:00"),
+            "{{\"a\":{{\"type\":\"datetime\",\"value\":\"1979-05-27T07:32:00-07:00\"}}}}",
+        )
+    // 1979-05-27T07:32:00 → datetime-local (kind 7)
+    bad = bad +
+        expect(
+            "local dt",
+            tagged_of("a = 1979-05-27T07:32:00"),
+            "{{\"a\":{{\"type\":\"datetime-local\",\"value\":\"1979-05-27T07:32:00\"}}}}",
+        )
+    // 1979-05-27 → date-local (kind 8)
+    bad = bad +
+        expect(
+            "local date",
+            tagged_of("a = 1979-05-27"),
+            "{{\"a\":{{\"type\":\"date-local\",\"value\":\"1979-05-27\"}}}}",
+        )
+    // 07:32:00 → time-local (kind 9)
+    bad = bad +
+        expect(
+            "local time",
+            tagged_of("a = 07:32:00"),
+            "{{\"a\":{{\"type\":\"time-local\",\"value\":\"07:32:00\"}}}}",
+        )
+    // Space separator prints as T
+    bad = bad +
+        expect(
+            "space sep",
+            tagged_of("a = 1979-05-27 07:32:00"),
+            "{{\"a\":{{\"type\":\"datetime-local\",\"value\":\"1979-05-27T07:32:00\"}}}}",
+        )
+    // t separator prints as T
+    bad = bad +
+        expect(
+            "t sep",
+            tagged_of("a = 1979-05-27t07:32:00"),
+            "{{\"a\":{{\"type\":\"datetime-local\",\"value\":\"1979-05-27T07:32:00\"}}}}",
+        )
+    // z prints as Z
+    bad = bad +
+        expect(
+            "z as Z",
+            tagged_of("a = 1979-05-27T07:32:00z"),
+            "{{\"a\":{{\"type\":\"datetime\",\"value\":\"1979-05-27T07:32:00Z\"}}}}",
+        )
+    // 0001-01-01 stays 0001-01-01 (year not padded to 2 digits)
+    bad = bad +
+        expect(
+            "year 1",
+            tagged_of("a = 0001-01-01"),
+            "{{\"a\":{{\"type\":\"date-local\",\"value\":\"0001-01-01\"}}}}",
+        )
+    // Fraction stays as written
+    bad = bad +
+        expect(
+            "fraction",
+            tagged_of("a = 1979-05-27T07:32:00.999"),
+            "{{\"a\":{{\"type\":\"datetime-local\",\"value\":\"1979-05-27T07:32:00.999\"}}}}",
+        )
+    bad
+}
+
+fn test_datetime_calendar() -> !int {
+    var bad = 0
+    // 2023-02-29 refused (not a leap year)
+    if !json_of("a = 2023-02-29").starts_with("ERR") {
+        print("2023-02-29 was accepted")
+        bad = bad + 1
+    }
+    // 2021-04-31 refused (April has 30 days)
+    if !json_of("a = 2021-04-31").starts_with("ERR") {
+        print("2021-04-31 was accepted")
+        bad = bad + 1
+    }
+    // 2000-13-01 refused (month 13)
+    if !json_of("a = 2000-13-01").starts_with("ERR") {
+        print("2000-13-01 was accepted")
+        bad = bad + 1
+    }
+    // 2000-00-10 refused (month 0)
+    if !json_of("a = 2000-00-10").starts_with("ERR") {
+        print("2000-00-10 was accepted")
+        bad = bad + 1
+    }
+    // 1979-05-27T24:00:00 refused (hour 24)
+    if !json_of("a = 1979-05-27T24:00:00").starts_with("ERR") {
+        print("1979-05-27T24:00:00 was accepted")
+        bad = bad + 1
+    }
+    // T07:60:00 refused (minute 60)
+    if !json_of("a = 1979-05-27T07:60:00").starts_with("ERR") {
+        print("T07:60:00 was accepted")
+        bad = bad + 1
+    }
+    // T07:32:61 refused (second 61, not a leap second)
+    if !json_of("a = 1979-05-27T07:32:61").starts_with("ERR") {
+        print("T07:32:61 was accepted")
+        bad = bad + 1
+    }
+    // 1979-05-27T07:32 refused (seconds required)
+    if !json_of("a = 1979-05-27T07:32").starts_with("ERR") {
+        print("1979-05-27T07:32 was accepted")
+        bad = bad + 1
+    }
+    // 07:32 refused (seconds required)
+    if !json_of("a = 07:32").starts_with("ERR") {
+        print("07:32 was accepted")
+        bad = bad + 1
+    }
+    // 07:32:00. refused (dot needs digits)
+    if !json_of("a = 07:32:00.").starts_with("ERR") {
+        print("07:32:00. was accepted")
+        bad = bad + 1
+    }
+    // …00.Z refused (dot needs digits)
+    if !json_of("a = 1979-05-27T07:32:00.Z").starts_with("ERR") {
+        print("…00.Z was accepted")
+        bad = bad + 1
+    }
+    // +24:00 refused (offset hour 24)
+    if !json_of("a = 1979-05-27T07:32:00+24:00").starts_with("ERR") {
+        print("+24:00 was accepted")
+        bad = bad + 1
+    }
+    // +05:60 refused (offset minute 60)
+    if !json_of("a = 1979-05-27T07:32:00+05:60").starts_with("ERR") {
+        print("+05:60 was accepted")
+        bad = bad + 1
+    }
+    // 2024-02-29 accepted (leap year)
+    bad = bad + expect("leap 2024", json_of("a = 2024-02-29"), "{{\"a\":\"2024-02-29\"}}")
+    // 2000-02-29 accepted (leap year, divisible by 400)
+    bad = bad + expect("leap 2000", json_of("a = 2000-02-29"), "{{\"a\":\"2000-02-29\"}}")
+    // 1900-02-28 accepted (not a leap year, divisible by 100)
+    bad = bad + expect("1900 not leap", json_of("a = 1900-02-28"), "{{\"a\":\"1900-02-28\"}}")
+    if !json_of("a = 1900-02-29").starts_with("ERR") {
+        print("1900-02-29 was accepted")
+        bad = bad + 1
+    }
+    // 23:59:60 accepted (leap second)
+    bad = bad + expect("leap second", json_of("a = 23:59:60"), "{{\"a\":\"23:59:60\"}}")
+    bad
+}
