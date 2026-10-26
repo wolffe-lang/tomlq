@@ -608,24 +608,33 @@ fn parse_inline_table(mut p: Parser) -> int ! {ParseError(int, int, str)} {
     }
     cursor_advance(mut p.c)
     let table_node = table_node(mut p.arena, 2)
-    cursor_skip_ws_comment(mut p.c)?
+    // Skip only spaces and tabs, not newlines
+    cursor_skip_spaces(mut p.c)
     let ch2 = cursor_peek(p.c)
     if ch2 == "}}" {
         cursor_advance(mut p.c)
         return table_node
     }
     while !cursor_at_end(p.c) {
+        // Check for newline before key
+        let ch_before = cursor_peek(p.c)
+        if ch_before == "\n" || ch_before == "\r" {
+            return ParseError(p.c.line, p.c.col, "newline in inline table")
+        }
         let segments = parse_key(mut p)?
-        cursor_skip_ws_comment(mut p.c)?
+        // Skip only spaces and tabs, not newlines
+        cursor_skip_spaces(mut p.c)
         let ch3 = cursor_peek(p.c)
         if ch3 != "=" {
             return ParseError(p.c.line, p.c.col, "expected =")
         }
         cursor_advance(mut p.c)
-        cursor_skip_ws_comment(mut p.c)?
+        // Skip only spaces and tabs, not newlines
+        cursor_skip_spaces(mut p.c)
         let value_node = parse_value(mut p)?
         add_key_for_segments(mut p, table_node, segments, value_node)?
-        cursor_skip_ws_comment(mut p.c)?
+        // Skip only spaces and tabs, not newlines
+        cursor_skip_spaces(mut p.c)
         let ch4 = cursor_peek(p.c)
         if ch4 == "}}" {
             cursor_advance(mut p.c)
@@ -633,11 +642,15 @@ fn parse_inline_table(mut p: Parser) -> int ! {ParseError(int, int, str)} {
         }
         if ch4 == "," {
             cursor_advance(mut p.c)
-            cursor_skip_ws_comment(mut p.c)?
+            // Skip only spaces and tabs, not newlines
+            cursor_skip_spaces(mut p.c)
             let ch5 = cursor_peek(p.c)
             if ch5 == "}}" {
-                cursor_advance(mut p.c)
-                return table_node
+                return ParseError(p.c.line, p.c.col, "trailing comma in inline table")
+            }
+            // Check for newline after comma
+            if ch5 == "\n" || ch5 == "\r" {
+                return ParseError(p.c.line, p.c.col, "newline in inline table")
             }
         } else {
             return ParseError(p.c.line, p.c.col, "expected , or }}")
