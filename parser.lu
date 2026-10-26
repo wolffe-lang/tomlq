@@ -76,8 +76,10 @@ fn parse_header(mut p: Parser) -> Header ! {ParseError(int, int, str)} {
         cursor_advance(mut p.c)
         // Table header must be followed by newline or EOF
         require_newline_or_eof(mut p)?
-        // Create intermediate tables for dotted keys, last segment is an array
-        let arr_node = or_create_array_for_path(mut p, segments)?
+        // Resolve the path: intermediate segments find or create tables,
+        // and where a segment names an array of tables, continue into its last element.
+        // The last segment names an array of tables; append a new table to it.
+        let arr_node = or_resolve_array_for_path(mut p, segments)?
         let new_table = table_node(mut p.arena, 3)
         add_child(mut p.arena, arr_node, new_table)
         return Header { kind: 2, node: new_table }
@@ -92,7 +94,7 @@ fn parse_header(mut p: Parser) -> Header ! {ParseError(int, int, str)} {
         // Table header must be followed by newline or EOF
         require_newline_or_eof(mut p)?
         // Create intermediate tables for dotted keys
-        let table_node = or_create_table_for_path(mut p, segments)?
+        let table_node = or_create_table_for_header(mut p, segments)?
         return Header { kind: 1, node: table_node }
     }
 }
@@ -125,6 +127,7 @@ fn require_newline_or_eof(mut p: Parser) -> () ! {ParseError(int, int, str)} {
 }
 
 /// Create tables for each segment of a path, returning the final table.
+/// Where a segment names an array of tables, resolve into its last element.
 fn or_create_table_for_path(mut p: Parser, segments: List[str]) -> int ! {
     ParseError(int, int, str),
 } {
@@ -132,11 +135,28 @@ fn or_create_table_for_path(mut p: Parser, segments: List[str]) -> int ! {
     var i = 0
     while i < segments.len {
         let segment = segments[i]
-        let child = or_create_table_in(mut p, current, segment)?
-        current = child
+        current = or_resolve_segment(mut p, current, segment)?
         i = i + 1
     }
     current
+}
+
+/// Create tables for each segment of a [path] header, returning the final table.
+/// Where a segment names an array of tables, resolve into its last element.
+/// The final segment must name a table (not an array).
+fn or_create_table_for_header(mut p: Parser, segments: List[str]) -> int ! {
+    ParseError(int, int, str),
+} {
+    let n = segments.len
+    var current = 0 // root table
+    var i = 0
+    while i < n - 1 {
+        let segment = segments[i]
+        current = or_resolve_segment(mut p, current, segment)?
+        i = i + 1
+    }
+    // Last segment: must be a table, not an array
+    or_create_table_in(mut p, current, segments[n - 1])?
 }
 
 /// Get or create a table child of parent with the given key. Returns error if key exists with wrong type.
@@ -150,7 +170,7 @@ fn or_create_table_in(mut p: Parser, parent: int, key: str) -> int ! {ParseError
             if kind == 0 {
                 return kid
             }
-            // Key exists but is not a table
+            // Key exists but is not a table (could be an array or a value)
             return ParseError(p.c.line, p.c.col, "key already defined")
         }
         i = i + 1
@@ -160,14 +180,32 @@ fn or_create_table_in(mut p: Parser, parent: int, key: str) -> int ! {ParseError
     new_table
 }
 
-/// Get or create an array child of parent with the given key. Returns error if key exists.
-/// For [[key]] headers, the key must not already exist (even as an array).
+/// Get or create an array child of parent with the given key.
+/// If the key already names an array of tables, return it (for appending).
+/// If the key names a plain array or something else, refuse.
 fn or_create_array_in(mut p: Parser, parent: int, key: str) -> int ! {ParseError(int, int, str)} {
     let nkeys = node_key_len(p.arena, parent)
     var i = 0
     while i < nkeys {
         if node_key_at(p.arena, parent, i) == key {
-            // Key already exists - [[key]] cannot extend an existing array
+            let kid = node_kid_at(p.arena, parent, i)
+            let kind = node_kind(p.arena, kid)
+            if kind == 1 {
+                // Already an array — check if it's an array of tables
+                let nkids = node_kid_len(p.arena, kid)
+                if nkids > 0 {
+                    // Check if the first child is a table
+                    let first = node_kid_at(p.arena, kid, 0)
+                    let first_kind = node_kind(p.arena, first)
+                    if first_kind != 0 {
+                        // Not an array of tables
+                        return ParseError(p.c.line, p.c.col, "key already defined")
+                    }
+                }
+                // It's an array of tables (or empty) — return it for appending
+                return kid
+            }
+            // Key exists but is not an array
             return ParseError(p.c.line, p.c.col, "key already defined")
         }
         i = i + 1
@@ -200,6 +238,64 @@ fn or_create_array_for_path(mut p: Parser, segments: List[str]) -> int ! {
     }
     // Last segment is the array key
     or_create_array_in(mut p, current, segments[n - 1])?
+}
+
+/// Resolve a path for a [[...]] header: intermediate segments find or create tables
+/// (resolving into the last element of arrays of tables), and the last segment
+/// finds or creates an array of tables. Returns the array node.
+fn or_resolve_array_for_path(mut p: Parser, segments: List[str]) -> int ! {
+    ParseError(int, int, str),
+} {
+    let n = segments.len
+    if n == 0 {
+        return ParseError(p.c.line, p.c.col, "empty key")
+    }
+    var current = 0 // root table
+    var i = 0
+    while i < n - 1 {
+        let segment = segments[i]
+        current = or_resolve_segment(mut p, current, segment)?
+        i = i + 1
+    }
+    // Last segment: find or create an array of tables
+    or_create_array_in(mut p, current, segments[n - 1])?
+}
+
+/// Resolve a segment: if it names a table, return it; if it names an array of tables,
+/// return its last element; if it doesn't exist, create a table.
+fn or_resolve_segment(mut p: Parser, parent: int, key: str) -> int ! {ParseError(int, int, str)} {
+    let nkeys = node_key_len(p.arena, parent)
+    var i = 0
+    while i < nkeys {
+        if node_key_at(p.arena, parent, i) == key {
+            let kid = node_kid_at(p.arena, parent, i)
+            let kind = node_kind(p.arena, kid)
+            if kind == 0 {
+                // It's a table — return it
+                return kid
+            }
+            if kind == 1 {
+                // It's an array — return its last element (must be a table)
+                let nkids = node_kid_len(p.arena, kid)
+                if nkids == 0 {
+                    return ParseError(p.c.line, p.c.col, "key already defined")
+                }
+                let last = node_kid_at(p.arena, kid, nkids - 1)
+                let last_kind = node_kind(p.arena, last)
+                if last_kind != 0 {
+                    return ParseError(p.c.line, p.c.col, "key already defined")
+                }
+                return last
+            }
+            // Key exists but is not a table or array
+            return ParseError(p.c.line, p.c.col, "key already defined")
+        }
+        i = i + 1
+    }
+    // Key doesn't exist — create a table
+    let new_table = table_node(mut p.arena, 1)
+    add_key(mut p.arena, parent, key, new_table)
+    new_table
 }
 
 /// Parse a key (bare or quoted, possibly dotted). Returns the segments as a list.
@@ -288,6 +384,7 @@ fn parse_key_value(mut p: Parser) -> int ! {ParseError(int, int, str)} {
 }
 
 /// Add a key for a list of segments, descending through intermediate tables.
+/// Where a segment names an array of tables, resolve into its last element.
 fn add_key_for_segments(mut p: Parser, parent: int, segments: List[str], value_node: int) -> () ! {
     ParseError(int, int, str),
 } {
@@ -300,19 +397,7 @@ fn add_key_for_segments(mut p: Parser, parent: int, segments: List[str], value_n
     var i = 0
     while i < n - 1 {
         let seg = segments[i]
-        let kid_idx = find_child(p.arena, current, seg) else -1
-        if kid_idx >= 0 {
-            let kind = node_kind(p.arena, kid_idx)
-            if kind != 0 {
-                return ParseError(p.c.line, p.c.col, "key already defined")
-            }
-            current = kid_idx
-        } else {
-            // Create an implicit table
-            let new_table = table_node(mut p.arena, 1)
-            add_key(mut p.arena, current, seg, new_table)
-            current = new_table
-        }
+        current = or_resolve_segment(mut p, current, seg)?
         i = i + 1
     }
     // Last segment: add the value
