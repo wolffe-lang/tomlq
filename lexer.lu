@@ -338,6 +338,7 @@ fn parse_multiline_basic_string(mut c: Cursor) -> str ! {ParseError(int, int, st
         }
         let ch = cursor_peek(c)
         if ch == "\\" {
+            after_open = false
             cursor_advance(mut c)
             let esc = cursor_peek(c)
             if esc == "" {
@@ -384,43 +385,30 @@ fn parse_multiline_basic_string(mut c: Cursor) -> str ! {ParseError(int, int, st
                     return ParseError(c.line, c.col, "unicode code point out of range")
                 }
                 result = result + code_point_to_str(val)
-            } else if esc == "\n" || esc == "\r" {
-                // Line continuation: \ followed by newline
-                if esc == "\r" {
-                    let next = cursor_peek(c)
-                    if next == "\n" {
-                        cursor_advance(mut c)
-                    }
-                }
-            } else if esc == " " || esc == "\t" {
-                // \ followed by whitespace: only valid if the rest of the line is whitespace
-                // Skip whitespace (spaces and tabs) until newline or non-whitespace
+            } else if esc == "\n" || esc == "\r" || esc == " " || esc == "\t" {
+                // A line-ending backslash: only spaces and tabs may follow it on
+                // its line, and it trims that newline and every space, tab and
+                // newline after it, up to the next other character.
+                var newline = esc == "\n" || esc == "\r"
                 while !cursor_at_end(c) {
                     let ws = cursor_peek(c)
-                    if ws == " " || ws == "\t" {
+                    if ws == "\n" || ws == "\r" {
+                        newline = true
+                        cursor_advance(mut c)
+                    } else if ws == " " || ws == "\t" {
                         cursor_advance(mut c)
                     } else {
                         break
                     }
                 }
-                // If we're at a newline, consume it (line continuation)
-                let after_ws = cursor_peek(c)
-                if after_ws == "\n" {
-                    cursor_advance(mut c)
-                } else if after_ws == "\r" {
-                    cursor_advance(mut c)
-                    let next2 = cursor_peek(c)
-                    if next2 == "\n" {
-                        cursor_advance(mut c)
-                    }
-                } else {
-                    // Not followed by newline: invalid escape
+                if !newline {
                     return ParseError(c.line, c.col, "invalid escape \\{esc}")
                 }
             } else {
                 return ParseError(c.line, c.col, "invalid escape \\{esc}")
             }
         } else if ch == "\"" {
+            after_open = false
             // A lone " or "" inside """ is just content
             result = result + ch
             cursor_advance(mut c)
