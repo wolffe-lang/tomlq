@@ -50,7 +50,7 @@ fn parser_init(text: str) -> Parser {
 /// Parse a TOML document. Returns the root node index.
 fn parse_document(mut p: Parser) -> int ! {ParseError(int, int, str)} {
     while !cursor_at_end(p.c) {
-        cursor_skip_ws_comment(mut p.c)
+        cursor_skip_ws_comment(mut p.c)?
         if cursor_at_end(p.c) {
             break
         }
@@ -85,7 +85,7 @@ fn parse_header(mut p: Parser) -> Header ! {ParseError(int, int, str)} {
     if ch2 == "[" {
         cursor_advance(mut p.c)
         let segments = parse_key(mut p)?
-        cursor_skip_ws_comment(mut p.c)
+        cursor_skip_ws_comment(mut p.c)?
         let ch3 = cursor_peek(p.c)
         if ch3 != "]" {
             return ParseError(p.c.line, p.c.col, "expected ]")
@@ -107,7 +107,7 @@ fn parse_header(mut p: Parser) -> Header ! {ParseError(int, int, str)} {
         return Header { kind: 2, node: new_table }
     } else {
         let segments = parse_key(mut p)?
-        cursor_skip_ws_comment(mut p.c)
+        cursor_skip_ws_comment(mut p.c)?
         let ch3 = cursor_peek(p.c)
         if ch3 != "]" {
             return ParseError(p.c.line, p.c.col, "expected ]")
@@ -153,7 +153,7 @@ fn require_newline_or_eof(mut p: Parser) -> () ! {ParseError(int, int, str)} {
             return
         }
     }
-    return ParseError(p.c.line, p.c.col, "table header not followed by newline")
+    return ParseError(p.c.line, p.c.col, "key/value not followed by newline")
 }
 
 /// Create tables for each segment of a path, returning the final table.
@@ -330,13 +330,13 @@ fn or_resolve_segment(mut p: Parser, parent: int, key: str) -> int ! {ParseError
 
 /// Parse a key (bare or quoted, possibly dotted). Returns the segments as a list.
 fn parse_key(mut p: Parser) -> List[str] ! {ParseError(int, int, str)} {
-    cursor_skip_ws_comment(mut p.c)
+    cursor_skip_ws_comment(mut p.c)?
     let ch = cursor_peek(p.c)
     var result = List[str]()
     if ch == "\"" {
-        let s = parse_string(mut p.c)?
+        let s = parse_key_string(mut p.c)?
         (mut result).push(s)
-        cursor_skip_ws_comment(mut p.c)
+        cursor_skip_spaces(mut p.c)
         let ch2 = cursor_peek(p.c)
         if ch2 == "." {
             cursor_advance(mut p.c)
@@ -350,9 +350,9 @@ fn parse_key(mut p: Parser) -> List[str] ! {ParseError(int, int, str)} {
         return result
     }
     if ch == "'" {
-        let s = parse_string(mut p.c)?
+        let s = parse_key_string(mut p.c)?
         (mut result).push(s)
-        cursor_skip_ws_comment(mut p.c)
+        cursor_skip_spaces(mut p.c)
         let ch2 = cursor_peek(p.c)
         if ch2 == "." {
             cursor_advance(mut p.c)
@@ -383,7 +383,7 @@ fn parse_key(mut p: Parser) -> List[str] ! {ParseError(int, int, str)} {
         return ParseError(p.c.line, p.c.col, "empty key")
     }
     (mut result).push(segment)
-    cursor_skip_ws_comment(mut p.c)
+    cursor_skip_spaces(mut p.c)
     let ch2 = cursor_peek(p.c)
     if ch2 == "." {
         cursor_advance(mut p.c)
@@ -400,16 +400,77 @@ fn parse_key(mut p: Parser) -> List[str] ! {ParseError(int, int, str)} {
 /// Parse a key = value pair.
 fn parse_key_value(mut p: Parser) -> int ! {ParseError(int, int, str)} {
     let segments = parse_key(mut p)?
-    cursor_skip_ws_comment(mut p.c)
+    // Skip only spaces and tabs, not newlines
+    cursor_skip_spaces(mut p.c)
+    let ch = cursor_peek(p.c)
+    if ch == "#" {
+        // Comment: skip to end of line
+        while !cursor_at_end(p.c) {
+            let ch2 = cursor_peek(p.c)
+            if ch2 == "\n" {
+                break
+            }
+            if ch2 == "\r" {
+                cursor_advance(mut p.c)
+                let next = cursor_peek(p.c)
+                if next == "\n" {
+                    cursor_advance(mut p.c)
+                }
+                break
+            }
+            cursor_advance(mut p.c)
+        }
+        // After comment, must be at newline or EOF
+        if !cursor_at_end(p.c) {
+            let ch3 = cursor_peek(p.c)
+            if ch3 != "\n" && ch3 != "\r" {
+                return ParseError(p.c.line, p.c.col, "key not followed by =")
+            }
+        }
+        // Now skip the newline
+        let _ = cursor_skip_ws_comment(mut p.c)?
+    }
     let ch = cursor_peek(p.c)
     if ch != "=" {
         return ParseError(p.c.line, p.c.col, "expected =")
     }
     cursor_advance(mut p.c)
-    cursor_skip_ws_comment(mut p.c)
+    // Skip only spaces and tabs, not newlines
+    cursor_skip_spaces(mut p.c)
+    // Check for comment
+    let ch = cursor_peek(p.c)
+    if ch == "#" {
+        // Skip to end of line
+        while !cursor_at_end(p.c) {
+            let ch2 = cursor_peek(p.c)
+            if ch2 == "\n" {
+                break
+            }
+            if ch2 == "\r" {
+                cursor_advance(mut p.c)
+                let next = cursor_peek(p.c)
+                if next == "\n" {
+                    cursor_advance(mut p.c)
+                }
+                break
+            }
+            cursor_advance(mut p.c)
+        }
+        // After comment, must be at newline or EOF
+        if !cursor_at_end(p.c) {
+            let ch3 = cursor_peek(p.c)
+            if ch3 != "\n" && ch3 != "\r" {
+                return ParseError(p.c.line, p.c.col, "= not followed by value")
+            }
+        }
+        // Now skip the newline
+        let _ = cursor_skip_ws_comment(mut p.c)?
+    }
     let value_node = parse_value(mut p)?
     // Walk the segments: every segment but the last finds or creates a table
     add_key_for_segments(mut p, p.current, segments, value_node)?
+    // Check that the value is followed by a newline, comment, or EOF
+    require_newline_or_eof(mut p)?
     value_node
 }
 
@@ -509,7 +570,7 @@ fn parse_array(mut p: Parser) -> int ! {ParseError(int, int, str)} {
     }
     cursor_advance(mut p.c)
     let arr_node = array_node(mut p.arena)
-    cursor_skip_ws_comment(mut p.c)
+    cursor_skip_ws_comment(mut p.c)?
     let ch2 = cursor_peek(p.c)
     if ch2 == "]" {
         cursor_advance(mut p.c)
@@ -518,7 +579,7 @@ fn parse_array(mut p: Parser) -> int ! {ParseError(int, int, str)} {
     while !cursor_at_end(p.c) {
         let value_node = parse_value(mut p)?
         add_child(mut p.arena, arr_node, value_node)
-        cursor_skip_ws_comment(mut p.c)
+        cursor_skip_ws_comment(mut p.c)?
         let ch3 = cursor_peek(p.c)
         if ch3 == "]" {
             cursor_advance(mut p.c)
@@ -526,7 +587,7 @@ fn parse_array(mut p: Parser) -> int ! {ParseError(int, int, str)} {
         }
         if ch3 == "," {
             cursor_advance(mut p.c)
-            cursor_skip_ws_comment(mut p.c)
+            cursor_skip_ws_comment(mut p.c)?
             let ch4 = cursor_peek(p.c)
             if ch4 == "]" {
                 cursor_advance(mut p.c)
@@ -547,7 +608,7 @@ fn parse_inline_table(mut p: Parser) -> int ! {ParseError(int, int, str)} {
     }
     cursor_advance(mut p.c)
     let table_node = table_node(mut p.arena, 2)
-    cursor_skip_ws_comment(mut p.c)
+    cursor_skip_ws_comment(mut p.c)?
     let ch2 = cursor_peek(p.c)
     if ch2 == "}}" {
         cursor_advance(mut p.c)
@@ -555,16 +616,16 @@ fn parse_inline_table(mut p: Parser) -> int ! {ParseError(int, int, str)} {
     }
     while !cursor_at_end(p.c) {
         let segments = parse_key(mut p)?
-        cursor_skip_ws_comment(mut p.c)
+        cursor_skip_ws_comment(mut p.c)?
         let ch3 = cursor_peek(p.c)
         if ch3 != "=" {
             return ParseError(p.c.line, p.c.col, "expected =")
         }
         cursor_advance(mut p.c)
-        cursor_skip_ws_comment(mut p.c)
+        cursor_skip_ws_comment(mut p.c)?
         let value_node = parse_value(mut p)?
         add_key_for_segments(mut p, table_node, segments, value_node)?
-        cursor_skip_ws_comment(mut p.c)
+        cursor_skip_ws_comment(mut p.c)?
         let ch4 = cursor_peek(p.c)
         if ch4 == "}}" {
             cursor_advance(mut p.c)
@@ -572,7 +633,7 @@ fn parse_inline_table(mut p: Parser) -> int ! {ParseError(int, int, str)} {
         }
         if ch4 == "," {
             cursor_advance(mut p.c)
-            cursor_skip_ws_comment(mut p.c)
+            cursor_skip_ws_comment(mut p.c)?
             let ch5 = cursor_peek(p.c)
             if ch5 == "}}" {
                 cursor_advance(mut p.c)

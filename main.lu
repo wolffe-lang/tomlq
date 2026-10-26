@@ -25,7 +25,7 @@ fn tokens_file(path: str) -> !int {
     }
     var c = cursor_init(text)
     while !cursor_at_end(c) {
-        cursor_skip_ws_comment(mut c)
+        cursor_skip_ws_comment(mut c)?
         if cursor_at_end(c) {
             break
         }
@@ -38,7 +38,7 @@ fn tokens_file(path: str) -> !int {
             print("STR {s}")
         } else if ch == "=" {
             cursor_advance(mut c)
-            cursor_skip_ws_comment(mut c)
+            cursor_skip_ws_comment(mut c)?
             if cursor_at_end(c) {
                 break
             }

@@ -73,20 +73,54 @@ fn cursor_skip_ws(mut c: Cursor) -> bool {
     changed
 }
 
+/// Skip only spaces and tabs (not newlines or comments).
+fn cursor_skip_spaces(mut c: Cursor) {
+    while !cursor_at_end(c) {
+        let ch = cursor_peek(c)
+        if ch == " " || ch == "\t" {
+            cursor_advance(mut c)
+        } else {
+            break
+        }
+    }
+}
+
 /// Skip whitespace and comments. Returns true if something was skipped.
-fn cursor_skip_ws_comment(mut c: Cursor) -> bool {
+fn cursor_skip_ws_comment(mut c: Cursor) -> bool ! {ParseError(int, int, str)} {
     var changed = false
     while !cursor_at_end(c) {
         let ch = cursor_peek(c)
-        if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
+        if ch == " " || ch == "\t" || ch == "\n" {
+            cursor_advance(mut c)
+            changed = true
+        } else if ch == "\r" {
+            // CR must be followed by LF
+            cursor_advance(mut c)
+            let next = cursor_peek(c)
+            if next != "\n" {
+                return ParseError(c.line, c.col, "bare CR in whitespace")
+            }
             cursor_advance(mut c)
             changed = true
         } else if ch == "#" {
-            // Skip to end of line
+            // Skip to end of line, checking for control characters
             while !cursor_at_end(c) {
                 let ch2 = cursor_peek(c)
                 if ch2 == "\n" {
                     break
+                }
+                if ch2 == "\r" {
+                    // CR must be followed by LF
+                    cursor_advance(mut c)
+                    let next = cursor_peek(c)
+                    if next != "\n" {
+                        return ParseError(c.line, c.col, "bare CR in comment")
+                    }
+                    cursor_advance(mut c)
+                    break
+                }
+                if is_control(ch2) {
+                    return ParseError(c.line, c.col, "control character in comment")
                 }
                 cursor_advance(mut c)
             }
@@ -158,6 +192,10 @@ fn is_control(ch: str) -> bool {
         // For single-byte characters, we can check if they're in the control range
         // by comparing with known boundary characters
         if ch < " " {
+            return true
+        }
+        // U+007F (DEL) is also a control character
+        if ch == "\x7F" {
             return true
         }
     }
@@ -417,6 +455,13 @@ fn parse_multiline_basic_string(mut c: Cursor) -> str ! {ParseError(int, int, st
             if is_control(ch) && ch != "\n" && ch != "\r" {
                 return ParseError(c.line, c.col, "control character in string")
             }
+            // Check for bare CR (CR not followed by LF)
+            if ch == "\r" {
+                let next = c.s.get(c.pos + 1..c.pos + 2) else ""
+                if next != "\n" {
+                    return ParseError(c.line, c.col, "bare CR in string")
+                }
+            }
             // Handle the newline immediately after opening """
             if after_open {
                 if ch == "\n" {
@@ -486,6 +531,13 @@ fn parse_multiline_literal_string(mut c: Cursor) -> str ! {ParseError(int, int, 
             if is_control(ch) && ch != "\n" && ch != "\r" {
                 return ParseError(c.line, c.col, "control character in literal string")
             }
+            // Check for bare CR (CR not followed by LF)
+            if ch == "\r" {
+                let next = c.s.get(c.pos + 1..c.pos + 2) else ""
+                if next != "\n" {
+                    return ParseError(c.line, c.col, "bare CR in literal string")
+                }
+            }
             // Handle the newline immediately after opening '''
             if after_open {
                 if ch == "\n" {
@@ -508,6 +560,24 @@ fn parse_multiline_literal_string(mut c: Cursor) -> str ! {ParseError(int, int, 
         }
     }
     return ParseError(c.line, c.col, "unexpected end of input in multi-line literal string")
+}
+
+/// Parse a key string (basic or literal, not multiline).
+/// The opening quote must be at the cursor.
+fn parse_key_string(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
+    let rest = c.s.get(c.pos..) else ""
+    if rest.starts_with("\"\"\"") || rest.starts_with("'''") {
+        return ParseError(c.line, c.col, "multi-line string in key")
+    }
+    if rest.starts_with("\"") {
+        cursor_advance(mut c)
+        return parse_basic_string(mut c)
+    }
+    if rest.starts_with("'") {
+        cursor_advance(mut c)
+        return parse_literal_string(mut c)
+    }
+    return ParseError(c.line, c.col, "expected string in key")
 }
 
 /// Parse a string starting at the current cursor position.
