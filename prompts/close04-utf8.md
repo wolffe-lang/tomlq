@@ -32,3 +32,8 @@ spec-1.0.0/keys-1, string-0, string-3. Paste the runner's summary before and aft
 
 ## Verify (paste)
 `wolf test .` (the count); the runner lines of step 3; `./test.sh; echo "exit=$?"` — C5 ok, J1's count lower. Stop.
+
+**Erratum (the judge, 2026-10-26, nudge05).** C5 cannot pass here: `tomlq PATH` prints a scalar quoted, and raw scalars
+are closeout 11 (finding 10). Verify C5's bytes with `--json` instead. `valid/key/escapes` stays red until closeout 5
+(the quoted dotted header `["a.b"."\u00c0"]`). `emit_json_string` slices one byte at a time too, so it needs the same
+whole-character walk as the lexer.
