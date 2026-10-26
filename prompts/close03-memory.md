@@ -42,3 +42,12 @@ copying the key list".
 ## Verify (paste)
 Step 1's three lines after the fix (memory should roughly double, not quadruple, per doubling); `./test.sh; echo
 "exit=$?"` with P1 and P2 ok and their memrun lines. Every other row as close02 left it. Stop.
+
+**Erratum (the judge, 2026-10-26, after the session's first fix):** two things the prompt got wrong.
+(1) The copies of the key list were real but not the main cost: `std.strbuf.push_str` is `b.s += s`, which copies the whole
+output on every push and frees nothing (wolf-lang#298), so any `--json`/`--tagged` output past ~40 KB took gigabytes. The fix is
+the byte-list sink in `prompt-nudge04.md`.
+(2) P2 as first written (140,000 keys in ONE table) measures the duplicate-key scan, which is linear per insert; it cannot pass in
+2 s, and wolf 0.2.34's `Map` cannot index it (10,000 string-key inserts peak at 2.1 GB; wolf-lang#972). The judge changed P2 to 140,000 keys in
+1,400 tables of 100; the single huge table is a known limit for the README (close12).
+

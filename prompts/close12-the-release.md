@@ -24,7 +24,8 @@ spell's and mk's layout:
    reproduce it (`bash tools/fetch-corpus.sh` then the runner line from test.sh).
 8. **Plain JSON:** keys in document order; `inf`, `-inf`, `nan` as strings; floats always have a `.` or an exponent;
    date-times as their text.
-9. **Known limits:** TOML 1.1 is not graded; anything test.sh does not cover that you know of. Nothing else.
+9. **Known limits:** TOML 1.1 is not graded; a single table with tens of thousands of keys parses in time that grows with the
+   square of its size (the duplicate-key check scans the table; wolf 0.2.34's `Map` is too costly to index it — wolf-lang#972); anything else test.sh does not cover that you know of. Nothing else.
 10. **Tests:** the commands; how many rows test.sh has and how many unit tests `wolf test .` runs (counted, pasted).
 11. **Measured numbers:** the P1 and P2 lines from test.sh (size, seconds, peak MB) and the machine (this Mac).
 12. **Files:** a table of every tracked file and what it holds (`git ls-files`).

@@ -78,11 +78,13 @@ else fail "P1    want rc=0, 100000 items, secs < 2, under 2048 MB" "got: $p1 ite
 rm -f .p1.toml .p1.json
 python3 -c "
 with open('.p2.toml', 'w') as f:
-    for i in range(140000): f.write('key%d = %d\n' % (i, i))
+    for t in range(1400):
+        f.write('[t%d]\n' % t)
+        for k in range(100): f.write('key%d = %d\n' % (k, k))
 "
 p2=$(bash tools/memrun.sh 2048 20 ./tomlq --json .p2.toml 2>&1 > /dev/null | tail -n 1)
 s=$(echo "$p2" | sed -n 's/.*secs=\([0-9.]*\).*/\1/p')
-if echo "$p2" | grep -q 'rc=0 ' && python3 -c "import sys; sys.exit(0 if float('$s') < 2 else 1)"; then pass "P2    140000 flat keys: $p2"
+if echo "$p2" | grep -q 'rc=0 ' && python3 -c "import sys; sys.exit(0 if float('$s') < 2 else 1)"; then pass "P2    140000 keys in 1400 tables: $p2"
 else fail "P2    want rc=0, secs < 2, under 2048 MB" "got: $p2"; fi
 rm -f .p2.toml
 echo
