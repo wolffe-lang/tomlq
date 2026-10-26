@@ -1,0 +1,26 @@
+//! A byte builder for long output. `std.strbuf`'s `push_str` is `b.s += s`, which
+//! copies the whole string on every push (wolf-lang#298), so a 100,000-piece JSON
+//! document needed gigabytes. A `List[byte]` grows in place.
+
+use std.bytes
+
+struct Sink {
+    out: List[byte],
+}
+
+fn sink_new() -> Sink {
+    Sink { out: List[byte]() }
+}
+
+fn sink_push(mut k: Sink, s: str) {
+    let bs = s.bytes()
+    var i = 0
+    while i < bs.len {
+        (mut k.out).push(bs[i])
+        i = i + 1
+    }
+}
+
+fn sink_text(k: Sink) -> str {
+    bytes.to_str(k.out) else ""
+}

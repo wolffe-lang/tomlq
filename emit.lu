@@ -1,18 +1,14 @@
 //! check: run(exit=0)
 
-use std.strbuf
-
 /// Emit a node as plain JSON.
 fn emit_json(arena: List[Node], i: int) -> str ! {ParseError(int, int, str)} {
-    var b = strbuf.new()
+    var b = sink_new()
     emit_json_node(mut b, arena, i)?
-    strbuf.to_str(b)
+    sink_text(b)
 }
 
-/// Emit a node as plain JSON into a strbuf.
-fn emit_json_node(mut b: strbuf.StrBuf, arena: List[Node], i: int) -> () ! {
-    ParseError(int, int, str),
-} {
+/// Emit a node as plain JSON into a sink.
+fn emit_json_node(mut b: Sink, arena: List[Node], i: int) -> () ! {ParseError(int, int, str)} {
     let kind = node_kind(arena, i)
     if kind == 0 {
         emit_json_table(mut b, arena, i)?
@@ -21,14 +17,14 @@ fn emit_json_node(mut b: strbuf.StrBuf, arena: List[Node], i: int) -> () ! {
     } else if kind == 2 {
         emit_json_string(mut b, node_str(arena, i))
     } else if kind == 3 {
-        strbuf.push_str(mut b, "{node_int(arena, i)}")
+        sink_push(mut b, "{node_int(arena, i)}")
     } else if kind == 4 {
-        strbuf.push_str(mut b, node_str(arena, i))
+        sink_push(mut b, node_str(arena, i))
     } else if kind == 5 {
         if node_bool(arena, i) {
-            strbuf.push_str(mut b, "true")
+            sink_push(mut b, "true")
         } else {
-            strbuf.push_str(mut b, "false")
+            sink_push(mut b, "false")
         }
     } else if kind >= 6 && kind <= 9 {
         emit_json_string(mut b, node_str(arena, i))
@@ -36,85 +32,79 @@ fn emit_json_node(mut b: strbuf.StrBuf, arena: List[Node], i: int) -> () ! {
 }
 
 /// Emit a table as JSON.
-fn emit_json_table(mut b: strbuf.StrBuf, arena: List[Node], i: int) -> () ! {
-    ParseError(int, int, str),
-} {
-    strbuf.push_str(mut b, "{{")
+fn emit_json_table(mut b: Sink, arena: List[Node], i: int) -> () ! {ParseError(int, int, str)} {
+    sink_push(mut b, "{{")
     let nkeys = node_key_len(arena, i)
     var first = true
     var j = 0
     while j < nkeys {
         if !first {
-            strbuf.push_str(mut b, ",")
+            sink_push(mut b, ",")
         }
         first = false
         emit_json_string(mut b, node_key_at(arena, i, j))
-        strbuf.push_str(mut b, ":")
+        sink_push(mut b, ":")
         emit_json_node(mut b, arena, node_kid_at(arena, i, j))?
         j = j + 1
     }
-    strbuf.push_str(mut b, "}}")
+    sink_push(mut b, "}}")
 }
 
 /// Emit an array as JSON.
-fn emit_json_array(mut b: strbuf.StrBuf, arena: List[Node], i: int) -> () ! {
-    ParseError(int, int, str),
-} {
-    strbuf.push_str(mut b, "[")
+fn emit_json_array(mut b: Sink, arena: List[Node], i: int) -> () ! {ParseError(int, int, str)} {
+    sink_push(mut b, "[")
     let nkids = node_kid_len(arena, i)
     var first = true
     var j = 0
     while j < nkids {
         if !first {
-            strbuf.push_str(mut b, ",")
+            sink_push(mut b, ",")
         }
         first = false
         emit_json_node(mut b, arena, node_kid_at(arena, i, j))?
         j = j + 1
     }
-    strbuf.push_str(mut b, "]")
+    sink_push(mut b, "]")
 }
 
 /// Emit a string as JSON.
-fn emit_json_string(mut b: strbuf.StrBuf, s: str) {
-    strbuf.push_str(mut b, "\"")
+fn emit_json_string(mut b: Sink, s: str) {
+    sink_push(mut b, "\"")
     var i = 0
     while i < s.len {
         let ch = s.get(i..i + 1) else ""
         if ch == "\"" {
-            strbuf.push_str(mut b, "\\\"")
+            sink_push(mut b, "\\\"")
         } else if ch == "\\" {
-            strbuf.push_str(mut b, "\\\\")
+            sink_push(mut b, "\\\\")
         } else if ch == "\n" {
-            strbuf.push_str(mut b, "\\n")
+            sink_push(mut b, "\\n")
         } else if ch == "\r" {
-            strbuf.push_str(mut b, "\\r")
+            sink_push(mut b, "\\r")
         } else if ch == "\t" {
-            strbuf.push_str(mut b, "\\t")
+            sink_push(mut b, "\\t")
         } else {
-            strbuf.push_str(mut b, ch)
+            sink_push(mut b, ch)
         }
         i = i + 1
     }
-    strbuf.push_str(mut b, "\"")
+    sink_push(mut b, "\"")
 }
 
 /// Emit a float as JSON.
-fn emit_json_float(mut b: strbuf.StrBuf, f: f64) {
-    strbuf.push_str(mut b, "{f}")
+fn emit_json_float(mut b: Sink, f: f64) {
+    sink_push(mut b, "{f}")
 }
 
 /// Emit a node as tagged JSON (corpus style).
 fn emit_tagged(arena: List[Node], i: int) -> str ! {ParseError(int, int, str)} {
-    var b = strbuf.new()
+    var b = sink_new()
     emit_tagged_node(mut b, arena, i)?
-    strbuf.to_str(b)
+    sink_text(b)
 }
 
-/// Emit a node as tagged JSON into a strbuf.
-fn emit_tagged_node(mut b: strbuf.StrBuf, arena: List[Node], i: int) -> () ! {
-    ParseError(int, int, str),
-} {
+/// Emit a node as tagged JSON into a sink.
+fn emit_tagged_node(mut b: Sink, arena: List[Node], i: int) -> () ! {ParseError(int, int, str)} {
     let kind = node_kind(arena, i)
     if kind == 0 {
         emit_tagged_table(mut b, arena, i)?
@@ -144,52 +134,48 @@ fn emit_tagged_node(mut b: strbuf.StrBuf, arena: List[Node], i: int) -> () ! {
 }
 
 /// Emit a tagged value: {"type": T, "value": V}
-fn emit_tagged_value(mut b: strbuf.StrBuf, t: str, v: str) {
-    strbuf.push_str(mut b, "{{\"type\":")
+fn emit_tagged_value(mut b: Sink, t: str, v: str) {
+    sink_push(mut b, "{{\"type\":")
     emit_json_string(mut b, t)
-    strbuf.push_str(mut b, ",\"value\":")
+    sink_push(mut b, ",\"value\":")
     emit_json_string(mut b, v)
-    strbuf.push_str(mut b, "}}")
+    sink_push(mut b, "}}")
 }
 
 /// Emit a table as tagged JSON.
-fn emit_tagged_table(mut b: strbuf.StrBuf, arena: List[Node], i: int) -> () ! {
-    ParseError(int, int, str),
-} {
-    strbuf.push_str(mut b, "{{")
+fn emit_tagged_table(mut b: Sink, arena: List[Node], i: int) -> () ! {ParseError(int, int, str)} {
+    sink_push(mut b, "{{")
     let nkeys = node_key_len(arena, i)
     var first = true
     var j = 0
     while j < nkeys {
         if !first {
-            strbuf.push_str(mut b, ",")
+            sink_push(mut b, ",")
         }
         first = false
         emit_json_string(mut b, node_key_at(arena, i, j))
-        strbuf.push_str(mut b, ":")
+        sink_push(mut b, ":")
         emit_tagged_node(mut b, arena, node_kid_at(arena, i, j))?
         j = j + 1
     }
-    strbuf.push_str(mut b, "}}")
+    sink_push(mut b, "}}")
 }
 
 /// Emit an array as tagged JSON.
-fn emit_tagged_array(mut b: strbuf.StrBuf, arena: List[Node], i: int) -> () ! {
-    ParseError(int, int, str),
-} {
-    strbuf.push_str(mut b, "[")
+fn emit_tagged_array(mut b: Sink, arena: List[Node], i: int) -> () ! {ParseError(int, int, str)} {
+    sink_push(mut b, "[")
     let nkids = node_kid_len(arena, i)
     var first = true
     var j = 0
     while j < nkids {
         if !first {
-            strbuf.push_str(mut b, ",")
+            sink_push(mut b, ",")
         }
         first = false
         emit_tagged_node(mut b, arena, node_kid_at(arena, i, j))?
         j = j + 1
     }
-    strbuf.push_str(mut b, "]")
+    sink_push(mut b, "]")
 }
 
 fn emit_main() -> !int ! {ParseError(int, int, str)} {
