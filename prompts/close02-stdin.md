@@ -28,3 +28,8 @@ its end, read chunks until the `eof` row and decode them as the file path decode
 `./test.sh; echo "exit=$?"`. Expected: I1, I2, I3, I4 and U1 ok; S1v and S1i move to what the parser does from a file
 (the judge measured 138/208 and 417/501 from files — paste the numbers you get, whatever they are). Every other row as
 close01 left it. Stop.
+
+**Erratum (the judge, 2026-10-26, after the session):** I3 cannot pass in this closeout. It checks that a bare CR is
+refused, and the parser accepts a bare CR from a file too (`invalid/control/bare-cr` is on the judge's list); refusing it is
+closeout 9, item 1. The Verify above should read: I1, I2, I4 and U1 ok; **I3 still fails** (fixed in close09). The session
+that ran this prompt circled on that contradiction; `prompt-nudge03.md` released it.

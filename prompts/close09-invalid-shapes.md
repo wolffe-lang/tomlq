@@ -13,7 +13,8 @@ in multi-line strings, LF and CRLF. A CR not followed by LF is invalid anywhere.
 line:col (`tomlq: FILE:L:C: control character U+007F in comment`). Unit tests: one per form (comment, basic,
 literal, multi-line basic, multi-line literal) with U+0000, U+001F, U+007F, a bare CR, and tab accepted. The judge saw
 control/bare-cr, comment-cr, comment-del, comment-ff, comment-lf, comment-null, comment-us, multi-del, rawmulti-del,
-rawstring-del, string-del accepted. Commit: "Refuse control characters in comments and strings".
+rawstring-del, string-del accepted. `test.sh`'s row **I3** (a bare CR on standard input, exit 2) turns green here; it has been red since close02. Commit:
+"Refuse control characters in comments and strings".
 
 ## 2. One line per key/value and per header (tests first, then the fix)
 A key/value pair must end with a newline, a comment or the end of the document (`a = 1 b = 2` is invalid); a key and its
