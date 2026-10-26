@@ -166,3 +166,151 @@ fn test_arrays_of_tables() -> !int {
     }
     bad
 }
+
+/// The plain JSON of a small document, or "ERR: ..." when it is refused.
+fn tagged_of(text: str) -> str {
+    var p = parser_init(text)
+    let root = parse_document(mut p) else |e| {
+        return "ERR: {e}"
+    }
+    emit_tagged(p.arena, root) else |e| {
+        "ERR: {e}"
+    }
+}
+
+fn test_integers_as_values() -> !int {
+    var bad = 0
+    // 0xDEADBEEF → 3735928559
+    bad = bad + expect("hex", json_of("a = 0xDEADBEEF"), "{{\"a\":3735928559}}")
+    // 0o755 → 493
+    bad = bad + expect("octal", json_of("a = 0o755"), "{{\"a\":493}}")
+    // 0b11010110 → 214
+    bad = bad + expect("binary", json_of("a = 0b11010110"), "{{\"a\":214}}")
+    // 1_000 → 1000
+    bad = bad + expect("underscore", json_of("a = 1_000"), "{{\"a\":1000}}")
+    // +99 → 99
+    bad = bad + expect("plus sign", json_of("a = +99"), "{{\"a\":99}}")
+    // -0 → 0
+    bad = bad + expect("neg zero", json_of("a = -0"), "{{\"a\":0}}")
+    // 9223372036854775807 accepted
+    bad = bad +
+        expect("max int", json_of("a = 9223372036854775807"), "{{\"a\":9223372036854775807}}")
+    // 9223372036854775808 refused
+    if !json_of("a = 9223372036854775808").starts_with("ERR") {
+        print("overflowing integer was accepted")
+        bad = bad + 1
+    }
+    // 0X1 refused (uppercase prefix)
+    if !json_of("a = 0X1").starts_with("ERR") {
+        print("0X1 was accepted")
+        bad = bad + 1
+    }
+    // 0O1 refused
+    if !json_of("a = 0O1").starts_with("ERR") {
+        print("0O1 was accepted")
+        bad = bad + 1
+    }
+    // 0B1 refused
+    if !json_of("a = 0B1").starts_with("ERR") {
+        print("0B1 was accepted")
+        bad = bad + 1
+    }
+    // +0x1 refused (sign on non-decimal)
+    if !json_of("a = +0x1").starts_with("ERR") {
+        print("+0x1 was accepted")
+        bad = bad + 1
+    }
+    // 01 refused (leading zero)
+    if !json_of("a = 01").starts_with("ERR") {
+        print("01 was accepted")
+        bad = bad + 1
+    }
+    // 1__0 refused (double underscore)
+    if !json_of("a = 1__0").starts_with("ERR") {
+        print("1__0 was accepted")
+        bad = bad + 1
+    }
+    // _1 refused (leading underscore)
+    if !json_of("a = _1").starts_with("ERR") {
+        print("_1 was accepted")
+        bad = bad + 1
+    }
+    // 1_ refused (trailing underscore)
+    if !json_of("a = 1_").starts_with("ERR") {
+        print("1_ was accepted")
+        bad = bad + 1
+    }
+    bad
+}
+
+fn test_floats_as_values() -> !int {
+    var bad = 0
+    // 1e2 → tagged 100, JSON 100.0
+    bad = bad + expect("1e2 json", json_of("a = 1e2"), "{{\"a\":100.0}}")
+    bad = bad +
+        expect(
+            "1e2 tagged",
+            tagged_of("a = 1e2"),
+            "{{\"a\":{{{{\"type\":\"float\",\"value\":\"100\"}}}}}}",
+        )
+    // 3.1e2 → 310/310.0
+    bad = bad + expect("3.1e2 json", json_of("a = 3.1e2"), "{{\"a\":310.0}}")
+    // -0.1 → -0.1
+    bad = bad + expect("neg float", json_of("a = -0.1"), "{{\"a\":-0.1}}")
+    // 1_0.5 → 10.5
+    bad = bad + expect("underscore float", json_of("a = 1_0.5"), "{{\"a\":10.5}}")
+    // +0e2 → 0/0.0
+    bad = bad + expect("+0e2 json", json_of("a = +0e2"), "{{\"a\":0.0}}")
+    // -inf → tagged -inf, JSON "-inf"
+    bad = bad + expect("-inf json", json_of("a = -inf"), "{{\"a\":\"-inf\"}}")
+    bad = bad +
+        expect(
+            "-inf tagged",
+            tagged_of("a = -inf"),
+            "{{\"a\":{{{{\"type\":\"float\",\"value\":\"-inf\"}}}}}}",
+        )
+    // nan → tagged nan, JSON "nan"
+    bad = bad + expect("nan json", json_of("a = nan"), "{{\"a\":\"nan\"}}")
+    bad = bad +
+        expect(
+            "nan tagged",
+            tagged_of("a = nan"),
+            "{{\"a\":{{{{\"type\":\"float\",\"value\":\"nan\"}}}}}}",
+        )
+    // .5 refused
+    if !json_of("a = .5").starts_with("ERR") {
+        print(".5 was accepted")
+        bad = bad + 1
+    }
+    // 1. refused
+    if !json_of("a = 1.").starts_with("ERR") {
+        print("1. was accepted")
+        bad = bad + 1
+    }
+    // -.5 refused
+    if !json_of("a = -.5").starts_with("ERR") {
+        print("-.5 was accepted")
+        bad = bad + 1
+    }
+    // 01.5 refused
+    if !json_of("a = 01.5").starts_with("ERR") {
+        print("01.5 was accepted")
+        bad = bad + 1
+    }
+    // 1e refused
+    if !json_of("a = 1e").starts_with("ERR") {
+        print("1e was accepted")
+        bad = bad + 1
+    }
+    // 1.e2 refused
+    if !json_of("a = 1.e2").starts_with("ERR") {
+        print("1.e2 was accepted")
+        bad = bad + 1
+    }
+    // 1__0.5 refused
+    if !json_of("a = 1__0.5").starts_with("ERR") {
+        print("1__0.5 was accepted")
+        bad = bad + 1
+    }
+    bad
+}
