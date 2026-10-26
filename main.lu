@@ -98,18 +98,13 @@ fn tokens_file(path: str) -> !int {
 /// Read text from a file path, or stdin if path is "-".
 fn read_input(path: str) -> str ! {ReadError(str)} {
     if path == "-" {
-        var result = ""
-        while true {
-            let line = read_line() else ""
-            if line == "" {
-                break
-            }
-            result = result + line + "\n"
+        fs.read_text("/dev/stdin") else |err| {
+            return ReadError("{err}")
         }
-        return result
-    }
-    fs.read_text(path) else |err| {
-        return ReadError("{err}")
+    } else {
+        fs.read_text(path) else |err| {
+            return ReadError("{err}")
+        }
     }
 }
 
