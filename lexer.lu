@@ -1,6 +1,6 @@
 //! check: run(exit=0)
 
-use std.strbuf
+use std.bytes
 
 /// A cursor into a byte string, tracking line and column.
 struct Cursor {
@@ -15,14 +15,28 @@ fn cursor_init(s: str) -> Cursor {
     Cursor { s: s, pos: 0, line: 1, col: 1 }
 }
 
+/// The whole UTF-8 character starting at byte `pos` of `s`, or "" at the end.
+/// A slice that splits a character is refused, so try one to four bytes.
+fn char_at(s: str, pos: int) -> str {
+    var n = 1
+    while n <= 4 && pos + n <= s.len {
+        let ch = s.get(pos..pos + n) else ""
+        if ch != "" {
+            return ch
+        }
+        n = n + 1
+    }
+    ""
+}
+
 /// Advance the cursor by one byte, updating line/col for newlines.
 fn cursor_advance(mut c: Cursor) {
     if c.pos >= c.s.len {
         return
     }
     // Check if the byte we're about to pass is a newline
-    let ch = c.s.get(c.pos..c.pos + 1) else ""
-    c.pos = c.pos + 1
+    let ch = char_at(c.s, c.pos)
+    c.pos = c.pos + (if ch.len > 0 then ch.len else 1)
     if ch == "\n" {
         c.line = c.line + 1
         c.col = 1
@@ -36,7 +50,7 @@ fn cursor_peek(c: Cursor) -> str {
     if c.pos >= c.s.len {
         return ""
     }
-    c.s.get(c.pos..c.pos + 1) else ""
+    char_at(c.s, c.pos)
 }
 
 /// Check if the cursor is at end of input.
@@ -151,11 +165,25 @@ fn is_control(ch: str) -> bool {
 }
 
 /// Decode a Unicode code point to a UTF-8 string.
+/// Encode a Unicode code point as UTF-8 (1 to 4 bytes).
 fn code_point_to_str(cp: int) -> str {
-    // Use strbuf to build the string from individual characters
-    var b = strbuf.new()
-    strbuf.push(mut b, cp as char)
-    strbuf.to_str(b)
+    var out = List[byte]()
+    if cp < 0x80 {
+        (mut out).push(cp as byte)
+    } else if cp < 0x800 {
+        (mut out).push((0xC0 + cp / 64) as byte)
+        (mut out).push((0x80 + cp % 64) as byte)
+    } else if cp < 0x10000 {
+        (mut out).push((0xE0 + cp / 4096) as byte)
+        (mut out).push((0x80 + cp / 64 % 64) as byte)
+        (mut out).push((0x80 + cp % 64) as byte)
+    } else {
+        (mut out).push((0xF0 + cp / 262144) as byte)
+        (mut out).push((0x80 + cp / 4096 % 64) as byte)
+        (mut out).push((0x80 + cp / 64 % 64) as byte)
+        (mut out).push((0x80 + cp % 64) as byte)
+    }
+    bytes.to_str(out) else ""
 }
 
 /// Parse a basic string (double-quoted). Returns the decoded string or raises an error.
