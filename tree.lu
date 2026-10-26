@@ -176,6 +176,26 @@ fn node_defined_by(arena: List[Node], i: int) -> int {
     arena[i].defined_by
 }
 
+/// Get the length of a node's key list without copying.
+fn node_key_len(arena: List[Node], i: int) -> int {
+    arena[i].keys.len
+}
+
+/// Get the length of a node's kid list without copying.
+fn node_kid_len(arena: List[Node], i: int) -> int {
+    arena[i].kids.len
+}
+
+/// Get the nth key of a node without copying the list.
+fn node_key_at(arena: List[Node], i: int, n: int) -> str {
+    arena[i].keys[n]
+}
+
+/// Get the nth kid of a node without copying the list.
+fn node_kid_at(arena: List[Node], i: int, n: int) -> int {
+    arena[i].kids[n]
+}
+
 fn tree_main() -> !int {
     var arena = List[Node]()
     let root = table_node(mut arena, 0)

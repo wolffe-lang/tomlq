@@ -40,18 +40,17 @@ fn emit_json_table(mut b: strbuf.StrBuf, arena: List[Node], i: int) -> () ! {
     ParseError(int, int, str),
 } {
     strbuf.push_str(mut b, "{{")
-    let keys = node_keys(arena, i)
-    let kids = node_kids(arena, i)
+    let nkeys = node_key_len(arena, i)
     var first = true
     var j = 0
-    while j < keys.len {
+    while j < nkeys {
         if !first {
             strbuf.push_str(mut b, ",")
         }
         first = false
-        emit_json_string(mut b, keys[j])
+        emit_json_string(mut b, node_key_at(arena, i, j))
         strbuf.push_str(mut b, ":")
-        emit_json_node(mut b, arena, kids[j])?
+        emit_json_node(mut b, arena, node_kid_at(arena, i, j))?
         j = j + 1
     }
     strbuf.push_str(mut b, "}}")
@@ -62,15 +61,15 @@ fn emit_json_array(mut b: strbuf.StrBuf, arena: List[Node], i: int) -> () ! {
     ParseError(int, int, str),
 } {
     strbuf.push_str(mut b, "[")
-    let kids = node_kids(arena, i)
+    let nkids = node_kid_len(arena, i)
     var first = true
     var j = 0
-    while j < kids.len {
+    while j < nkids {
         if !first {
             strbuf.push_str(mut b, ",")
         }
         first = false
-        emit_json_node(mut b, arena, kids[j])?
+        emit_json_node(mut b, arena, node_kid_at(arena, i, j))?
         j = j + 1
     }
     strbuf.push_str(mut b, "]")
@@ -158,18 +157,17 @@ fn emit_tagged_table(mut b: strbuf.StrBuf, arena: List[Node], i: int) -> () ! {
     ParseError(int, int, str),
 } {
     strbuf.push_str(mut b, "{{")
-    let keys = node_keys(arena, i)
-    let kids = node_kids(arena, i)
+    let nkeys = node_key_len(arena, i)
     var first = true
     var j = 0
-    while j < keys.len {
+    while j < nkeys {
         if !first {
             strbuf.push_str(mut b, ",")
         }
         first = false
-        emit_json_string(mut b, keys[j])
+        emit_json_string(mut b, node_key_at(arena, i, j))
         strbuf.push_str(mut b, ":")
-        emit_tagged_node(mut b, arena, kids[j])?
+        emit_tagged_node(mut b, arena, node_kid_at(arena, i, j))?
         j = j + 1
     }
     strbuf.push_str(mut b, "}}")
@@ -180,15 +178,15 @@ fn emit_tagged_array(mut b: strbuf.StrBuf, arena: List[Node], i: int) -> () ! {
     ParseError(int, int, str),
 } {
     strbuf.push_str(mut b, "[")
-    let kids = node_kids(arena, i)
+    let nkids = node_kid_len(arena, i)
     var first = true
     var j = 0
-    while j < kids.len {
+    while j < nkids {
         if !first {
             strbuf.push_str(mut b, ",")
         }
         first = false
-        emit_tagged_node(mut b, arena, kids[j])?
+        emit_tagged_node(mut b, arena, node_kid_at(arena, i, j))?
         j = j + 1
     }
     strbuf.push_str(mut b, "]")

@@ -147,12 +147,11 @@ fn or_create_table_for_path(mut p: Parser, key: str) -> int ! {ParseError(int, i
 
 /// Get or create a table child of parent with the given key. Returns error if key exists with wrong type.
 fn or_create_table_in(mut p: Parser, parent: int, key: str) -> int ! {ParseError(int, int, str)} {
-    let keys = node_keys(p.arena, parent)
-    let kids = node_kids(p.arena, parent)
+    let nkeys = node_key_len(p.arena, parent)
     var i = 0
-    while i < keys.len {
-        if keys[i] == key {
-            let kid = kids[i]
+    while i < nkeys {
+        if node_key_at(p.arena, parent, i) == key {
+            let kid = node_kid_at(p.arena, parent, i)
             let kind = node_kind(p.arena, kid)
             if kind == 0 {
                 return kid
@@ -170,11 +169,10 @@ fn or_create_table_in(mut p: Parser, parent: int, key: str) -> int ! {ParseError
 /// Get or create an array child of parent with the given key. Returns error if key exists.
 /// For [[key]] headers, the key must not already exist (even as an array).
 fn or_create_array_in(mut p: Parser, parent: int, key: str) -> int ! {ParseError(int, int, str)} {
-    let keys = node_keys(p.arena, parent)
-    let kids = node_kids(p.arena, parent)
+    let nkeys = node_key_len(p.arena, parent)
     var i = 0
-    while i < keys.len {
-        if keys[i] == key {
+    while i < nkeys {
+        if node_key_at(p.arena, parent, i) == key {
             // Key already exists - [[key]] cannot extend an existing array
             return ParseError(p.c.line, p.c.col, "key already defined")
         }
@@ -273,10 +271,10 @@ fn parse_key_value(mut p: Parser) -> int ! {ParseError(int, int, str)} {
 fn add_key_checked(mut p: Parser, parent: int, key: str, value_node: int) -> () ! {
     ParseError(int, int, str),
 } {
-    let keys = node_keys(p.arena, parent)
+    let nkeys = node_key_len(p.arena, parent)
     var i = 0
-    while i < keys.len {
-        if keys[i] == key {
+    while i < nkeys {
+        if node_key_at(p.arena, parent, i) == key {
             return ParseError(p.c.line, p.c.col, "key already defined")
         }
         i = i + 1
@@ -302,12 +300,11 @@ fn add_key_checked(mut p: Parser, parent: int, key: str, value_node: int) -> () 
 
 /// Find the index of a child node by key.
 fn find_child(arena: List[Node], parent: int, key: str) -> int ! {ParseError(int, int, str)} {
-    let keys = node_keys(arena, parent)
-    let kids = node_kids(arena, parent)
+    let nkeys = node_key_len(arena, parent)
     var i = 0
-    while i < keys.len {
-        if keys[i] == key {
-            return kids[i]
+    while i < nkeys {
+        if node_key_at(arena, parent, i) == key {
+            return node_kid_at(arena, parent, i)
         }
         i = i + 1
     }

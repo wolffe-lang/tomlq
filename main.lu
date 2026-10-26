@@ -188,11 +188,11 @@ fn navigate_path(arena: List[Node], root: int, path: str) -> int {
             if node_kind(arena, current) != 1 {
                 return -1
             }
-            let kids = node_kids(arena, current)
-            if idx >= kids.len {
+            let nkids = node_kid_len(arena, current)
+            if idx >= nkids {
                 return -1
             }
-            current = kids[idx]
+            current = node_kid_at(arena, current, idx)
             // Skip "." after index
             if pos < path.len && (path.get(pos..pos + 1) else "") == "." {
                 pos = pos + 1
@@ -218,13 +218,12 @@ fn navigate_path(arena: List[Node], root: int, path: str) -> int {
         if node_kind(arena, current) != 0 {
             return -1
         }
-        let keys = node_keys(arena, current)
-        let kids = node_kids(arena, current)
+        let nkeys = node_key_len(arena, current)
         var found = false
         var i = 0
-        while i < keys.len {
-            if keys[i] == key {
-                current = kids[i]
+        while i < nkeys {
+            if node_key_at(arena, current, i) == key {
+                current = node_kid_at(arena, current, i)
                 found = true
                 break
             }
@@ -243,10 +242,10 @@ fn print_keys(arena: List[Node], i: int) {
         print("not a table")
         return
     }
-    let keys = node_keys(arena, i)
+    let nkeys = node_key_len(arena, i)
     var j = 0
-    while j < keys.len {
-        print(keys[j])
+    while j < nkeys {
+        print(node_key_at(arena, i, j))
         j = j + 1
     }
 }
@@ -255,8 +254,8 @@ fn print_keys(arena: List[Node], i: int) {
 fn print_len(arena: List[Node], i: int) {
     let kind = node_kind(arena, i)
     if kind == 0 || kind == 1 {
-        let kids = node_kids(arena, i)
-        print("{kids.len}")
+        let nkids = node_kid_len(arena, i)
+        print("{nkids}")
     } else {
         print("not a container")
     }
