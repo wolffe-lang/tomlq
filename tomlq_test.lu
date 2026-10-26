@@ -1,0 +1,24 @@
+//! check: run(exit=0)
+
+fn test_main() -> !int {
+    // Test that the parser can parse a simple TOML file
+    let text = "a = 1\nb = \"hello\"\nc = true"
+    var p = parser_init(text)
+    let root = parse_document(mut p) else |e| {
+        print("parse failed: {e}")
+        return 1
+    }
+    // Test that we can navigate the tree
+    let a_node = navigate_path(p.arena, root, "a")
+    if a_node < 0 {
+        print("navigate failed")
+        return 1
+    }
+    // Test that we can emit JSON
+    let j = emit_json(p.arena, root) else |e| {
+        print("emit failed: {e}")
+        return 1
+    }
+    print("json: {j}")
+    0
+}

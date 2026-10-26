@@ -1,0 +1,782 @@
+//! check: run(exit=0)
+
+use std.fs
+use std.strbuf
+
+fn usage() -> !int {
+    print("usage: tomlq [--json | --tagged] FILE")
+    print("       tomlq [--raw] PATH FILE")
+    print("       tomlq --keys PATH FILE | --len PATH FILE")
+    print("       tomlq --spec DIR [--spec-verbose] [--only SUBDIR]")
+    print("       tomlq --help")
+    0
+}
+
+fn not_implemented() -> !int {
+    print("tomlq: not implemented")
+    2
+}
+
+/// Read a file and print its tokens.
+fn tokens_file(path: str) -> !int {
+    let text = fs.read_text(path) else |err| {
+        print("tomlq: {path}: {err}")
+        return 2
+    }
+    var c = cursor_init(text)
+    while !cursor_at_end(c) {
+        cursor_skip_ws_comment(mut c)
+        if cursor_at_end(c) {
+            break
+        }
+        let ch = cursor_peek(c)
+        if ch == "\"" || ch == "'" {
+            let s = parse_string(mut c) else |err| {
+                print("tomlq: {path}: {err}")
+                return 2
+            }
+            print("STR {s}")
+        } else if ch == "=" {
+            cursor_advance(mut c)
+            cursor_skip_ws_comment(mut c)
+            if cursor_at_end(c) {
+                break
+            }
+            let kind = peek_value_kind(c)
+            if kind == "string" {
+                let v = parse_string(mut c) else |err| {
+                    print("tomlq: {path}: {err}")
+                    return 2
+                }
+                print("STR {v}")
+            } else if kind == "integer" {
+                let v = parse_integer(mut c) else |err| {
+                    print("tomlq: {path}: {err}")
+                    return 2
+                }
+                print("INT {v}")
+            } else if kind == "float" {
+                let v = parse_float(mut c) else |err| {
+                    print("tomlq: {path}: {err}")
+                    return 2
+                }
+                print("FLT {v}")
+            } else if kind == "bool" {
+                let v = parse_boolean(mut c) else |err| {
+                    print("tomlq: {path}: {err}")
+                    return 2
+                }
+                print("BOOL {v}")
+            } else if kind == "datetime" {
+                let v = parse_datetime(mut c) else |err| {
+                    print("tomlq: {path}: {err}")
+                    return 2
+                }
+                print("DATETIME {v}")
+            } else if kind == "local-date" {
+                let v = parse_local_date(mut c) else |err| {
+                    print("tomlq: {path}: {err}")
+                    return 2
+                }
+                print("LOCAL-DATE {v}")
+            } else if kind == "local-time" {
+                let v = parse_local_time(mut c) else |err| {
+                    print("tomlq: {path}: {err}")
+                    return 2
+                }
+                print("LOCAL-TIME {v}")
+            } else {
+                cursor_advance(mut c)
+            }
+        } else {
+            cursor_advance(mut c)
+        }
+    }
+    0
+}
+
+/// Read text from a file path, or stdin if path is "-".
+fn read_input(path: str) -> str ! {ReadError(str)} {
+    if path == "-" {
+        var result = ""
+        while true {
+            let line = read_line() else ""
+            if line == "" {
+                break
+            }
+            result = result + line + "\n"
+        }
+        return result
+    }
+    fs.read_text(path) else |err| {
+        return ReadError("{err}")
+    }
+}
+
+/// Read a file and print its JSON.
+fn json_file(path: str) -> !int {
+    let text = read_input(path) else |ReadError(msg)| {
+        print("tomlq: {path}: {msg}")
+        return 2
+    }
+    var p = parser_init(text)
+    let root = parse_document(mut p) else |e| match e {
+        ParseError(l, c, m) => {
+            print("tomlq: {path}:{l}:{c}: {m}")
+            return 2
+        },
+    }
+    let j = emit_json(p.arena, root) else |e| match e {
+        ParseError(l, c, m) => {
+            print("tomlq: {path}:{l}:{c}: {m}")
+            return 2
+        },
+    }
+    print(j)
+    0
+}
+
+/// Read a file and print its tagged JSON.
+fn tagged_file(path: str) -> !int {
+    let text = read_input(path) else |ReadError(msg)| {
+        print("tomlq: {path}: {msg}")
+        return 2
+    }
+    var p = parser_init(text)
+    let root = parse_document(mut p) else |e| match e {
+        ParseError(l, c, m) => {
+            print("tomlq: {path}:{l}:{c}: {m}")
+            return 2
+        },
+    }
+    let j = emit_tagged(p.arena, root) else |e| match e {
+        ParseError(l, c, m) => {
+            print("tomlq: {path}:{l}:{c}: {m}")
+            return 2
+        },
+    }
+    print(j)
+    0
+}
+
+/// Navigate the arena tree by a dot-separated path. Returns the node index, or -1 if not found.
+/// Handles leading ".", quoted segments (."a b"), and [N] indexes into arrays.
+fn navigate_path(arena: List[Node], root: int, path: str) -> int {
+    if path == "" {
+        return root
+    }
+    var current = root
+    var pos = 0
+    // Skip leading "."
+    if (path.get(0..1) else "") == "." {
+        pos = 1
+    }
+    while pos < path.len {
+        // Check for [N] index
+        if (path.get(pos..pos + 1) else "") == "[" {
+            // Parse index
+            var end = pos + 1
+            while end < path.len {
+                let ch = path.get(end..end + 1) else ""
+                if ch == "]" {
+                    break
+                }
+                end = end + 1
+            }
+            let idx_str = path.get(pos + 1..end) else ""
+            let idx = idx_str.to_int() else -1
+            if idx < 0 {
+                return -1
+            }
+            pos = end + 1
+            // Index into array
+            if node_kind(arena, current) != 1 {
+                return -1
+            }
+            let kids = node_kids(arena, current)
+            if idx >= kids.len {
+                return -1
+            }
+            current = kids[idx]
+            // Skip "." after index
+            if pos < path.len && (path.get(pos..pos + 1) else "") == "." {
+                pos = pos + 1
+            }
+            continue
+        }
+        // Find next "." or "["
+        var next = pos
+        while next < path.len {
+            let ch = path.get(next..next + 1) else ""
+            if ch == "." || ch == "[" {
+                break
+            }
+            next = next + 1
+        }
+        let key = path.get(pos..next) else ""
+        pos = next
+        // Skip "."
+        if pos < path.len && (path.get(pos..pos + 1) else "") == "." {
+            pos = pos + 1
+        }
+        // Find key in current node
+        if node_kind(arena, current) != 0 {
+            return -1
+        }
+        let keys = node_keys(arena, current)
+        let kids = node_kids(arena, current)
+        var found = false
+        var i = 0
+        while i < keys.len {
+            if keys[i] == key {
+                current = kids[i]
+                found = true
+                break
+            }
+            i = i + 1
+        }
+        if !found {
+            return -1
+        }
+    }
+    current
+}
+
+/// Print the keys of a table node.
+fn print_keys(arena: List[Node], i: int) {
+    if node_kind(arena, i) != 0 {
+        print("not a table")
+        return
+    }
+    let keys = node_keys(arena, i)
+    var j = 0
+    while j < keys.len {
+        print(keys[j])
+        j = j + 1
+    }
+}
+
+/// Print the length of a table or array node.
+fn print_len(arena: List[Node], i: int) {
+    let kind = node_kind(arena, i)
+    if kind == 0 || kind == 1 {
+        let kids = node_kids(arena, i)
+        print("{kids.len}")
+    } else {
+        print("not a container")
+    }
+}
+
+/// Print the raw value of a node.
+fn print_raw_value(arena: List[Node], i: int) {
+    let kind = node_kind(arena, i)
+    if kind == 2 {
+        print(node_str(arena, i))
+    } else if kind == 3 {
+        print("{node_int(arena, i)}")
+    } else if kind == 4 {
+        print(node_str(arena, i))
+    } else if kind == 5 {
+        if node_bool(arena, i) {
+            print("true")
+        } else {
+            print("false")
+        }
+    } else if kind >= 6 && kind <= 9 {
+        print(node_str(arena, i))
+    } else {
+        print("not a scalar")
+    }
+}
+
+/// Parse a file and navigate to a path, then perform an action.
+fn query_file(path: str, file: str, action: str) -> !int {
+    let text = read_input(file) else |ReadError(msg)| {
+        print("tomlq: {file}: {msg}")
+        return 2
+    }
+    var p = parser_init(text)
+    let root = parse_document(mut p) else |e| match e {
+        ParseError(l, c, m) => {
+            print("tomlq: {file}:{l}:{c}: {m}")
+            return 2
+        },
+    }
+    let node = navigate_path(p.arena, root, path)
+    if node < 0 {
+        return 1
+    }
+    if action == "keys" {
+        print_keys(p.arena, node)
+    } else if action == "len" {
+        print_len(p.arena, node)
+    } else if action == "raw" {
+        print_raw_value(p.arena, node)
+    } else {
+        // Default: print JSON of the node
+        let j = emit_json(p.arena, node) else |e| match e {
+            ParseError(l, c, m) => {
+                print("tomlq: {file}:{l}:{c}: {m}")
+                return 2
+            },
+        }
+        print(j)
+    }
+    0
+}
+
+/// Compare two JSON strings after stripping whitespace. Returns true if equal.
+fn json_equal(a: str, b: str) -> bool {
+    let sa = strip_ws(a)
+    let sb = strip_ws(b)
+    sa == sb
+}
+
+/// Strip all whitespace from a string.
+fn strip_ws(s: str) -> str {
+    var result = strbuf.new()
+    var i = 0
+    while i < s.len {
+        let ch = s.get(i..i + 1) else ""
+        if ch != " " && ch != "\n" && ch != "\r" && ch != "\t" {
+            strbuf.push_str(mut result, ch)
+        }
+        i = i + 1
+    }
+    strbuf.to_str(result)
+}
+
+/// Sort keys in a JSON string recursively.
+fn sort_keys_json(s: str) -> str {
+    var result = strbuf.new()
+    sort_keys_json_inner(mut result, s)
+    strbuf.to_str(result)
+}
+
+fn sort_keys_json_inner(mut b: strbuf.StrBuf, s: str) {
+    var i = 0
+    while i < s.len {
+        let ch = s.get(i..i + 1) else ""
+        if ch == "{{" {
+            // Start of object or value
+            // Check if next non-ws is " (object) or something else
+            var j = i + 1
+            while j < s.len {
+                let c2 = s.get(j..j + 1) else ""
+                if c2 != " " && c2 != "\n" && c2 != "\r" && c2 != "\t" {
+                    break
+                }
+                j = j + 1
+            }
+            if j < s.len && (s.get(j..j + 1) else "") == "\"" {
+                // Object: collect key-value pairs, sort them
+                let obj = sort_keys_object(s, i)
+                strbuf.push_str(mut b, obj)
+                i = i + obj.len
+            } else {
+                // Not an object, just copy
+                strbuf.push_str(mut b, ch)
+                i = i + 1
+            }
+        } else if ch == "[" {
+            // Array: copy as-is
+            strbuf.push_str(mut b, ch)
+            i = i + 1
+        } else {
+            strbuf.push_str(mut b, ch)
+            i = i + 1
+        }
+    }
+}
+
+/// Sort keys in a JSON object. s[i] is "{".
+fn sort_keys_object(s: str, i: int) -> str {
+    // Find the matching "}"
+    var depth = 0
+    var j = i
+    while j < s.len {
+        let ch = s.get(j..j + 1) else ""
+        if ch == "{{" || ch == "[" {
+            depth = depth + 1
+        } else if ch == "}}" || ch == "]" {
+            depth = depth - 1
+            if depth == 0 {
+                break
+            }
+        }
+        j = j + 1
+    }
+    // s[i..j+1] is the object
+    let obj = s.get(i..j + 1) else ""
+    // Parse keys and values, sort by key
+    var keys = List[str]()
+    var values = List[str]()
+    var pos = i + 1
+    while pos < j {
+        // Skip whitespace
+        while pos < j {
+            let c = s.get(pos..pos + 1) else ""
+            if c != " " && c != "\n" && c != "\r" && c != "\t" {
+                break
+            }
+            pos = pos + 1
+        }
+        if pos >= j {
+            break
+        }
+        // Parse key (string)
+        let key_end = find_string_end(s, pos)
+        let key = s.get(pos..key_end + 1) else ""
+        pos = key_end + 1
+        // Skip whitespace and ":"
+        while pos < j {
+            let c = s.get(pos..pos + 1) else ""
+            if c != " " && c != "\n" && c != "\r" && c != "\t" && c != ":" {
+                break
+            }
+            pos = pos + 1
+        }
+        // Parse value (could be object, array, string, number, bool, null)
+        let val_end = find_value_end(s, pos)
+        let val = s.get(pos..val_end + 1) else ""
+        pos = val_end + 1
+        // Skip ","
+        while pos < j {
+            let c = s.get(pos..pos + 1) else ""
+            if c != " " && c != "\n" && c != "\r" && c != "\t" && c != "," {
+                break
+            }
+            pos = pos + 1
+        }
+        (mut keys).push(key)
+        (mut values).push(val)
+    }
+    // Sort keys (simple bubble sort)
+    var k = 0
+    while k < keys.len {
+        var m = k + 1
+        while m < keys.len {
+            if keys[m] < keys[k] {
+                // Swap
+                let tmp_k = keys[k]
+                keys[k] = keys[m]
+                keys[m] = tmp_k
+                let tmp_v = values[k]
+                values[k] = values[m]
+                values[m] = tmp_v
+            }
+            m = m + 1
+        }
+        k = k + 1
+    }
+    // Build sorted object
+    var result = strbuf.new()
+    strbuf.push_str(mut result, "{{")
+    var first = true
+    var n = 0
+    while n < keys.len {
+        if !first {
+            strbuf.push_str(mut result, ",")
+        }
+        first = false
+        sort_keys_json_inner(mut result, keys[n])
+        strbuf.push_str(mut result, ":")
+        sort_keys_json_inner(mut result, values[n])
+        n = n + 1
+    }
+    strbuf.push_str(mut result, "}}")
+    strbuf.to_str(result)
+}
+
+/// Find the end of a JSON string starting at s[i] == "\"". Returns the index of the closing "\"".
+fn find_string_end(s: str, i: int) -> int {
+    var j = i + 1
+    while j < s.len {
+        let ch = s.get(j..j + 1) else ""
+        if ch == "\\" {
+            j = j + 2
+        } else if ch == "\"" {
+            return j
+        } else {
+            j = j + 1
+        }
+    }
+    j
+}
+
+/// Find the end of a JSON value starting at s[i]. Returns the index of the last character.
+fn find_value_end(s: str, i: int) -> int {
+    let ch = s.get(i..i + 1) else ""
+    if ch == "\"" {
+        return find_string_end(s, i)
+    }
+    if ch == "{{" || ch == "[" {
+        var depth = 0
+        var j = i
+        while j < s.len {
+            let c = s.get(j..j + 1) else ""
+            if c == "{{" || c == "[" {
+                depth = depth + 1
+            } else if c == "}}" || c == "]" {
+                depth = depth - 1
+                if depth == 0 {
+                    return j
+                }
+            }
+            j = j + 1
+        }
+        return j
+    }
+    // Number, bool, null
+    var j = i
+    while j < s.len {
+        let c = s.get(j..j + 1) else ""
+        if c == "," || c == "}}" || c == "]" || c == " " || c == "\n" || c == "\r" || c == "\t" {
+            break
+        }
+        j = j + 1
+    }
+    j - 1
+}
+
+/// Collect all .toml files in a directory recursively.
+fn collect_toml_files(dir: str, mut result: List[str]) {
+    let entries = fs.read_dir(dir) else |err| {
+        print("tomlq: {dir}: {err}")
+        return
+    }
+    var e = 0
+    while e < entries.len {
+        let name = entries[e]
+        e = e + 1
+        let path = dir + "/" + name
+        if name.ends_with(".toml") {
+            (mut result).push(path)
+        } else {
+            // Check if it's a directory
+            let sub_entries = fs.read_dir(path) else |err2| {
+                // Not a directory, skip
+                continue
+            }
+            collect_toml_files(path, mut result)
+        }
+    }
+}
+
+/// Read the 1.0 file list from DIR/files-toml-1.0.0. Returns a list of relative paths.
+fn read_1_0_list(dir: str) -> List[str] {
+    var result = List[str]()
+    let list_path = dir + "/files-toml-1.0.0"
+    let text = fs.read_text(list_path) else |err| {
+        print("tomlq: {list_path}: {err}")
+        return result
+    }
+    var pos = 0
+    while pos < text.len {
+        // Find next newline
+        var end = pos
+        while end < text.len {
+            let ch = text.get(end..end + 1) else ""
+            if ch == "\n" {
+                break
+            }
+            end = end + 1
+        }
+        let line = text.get(pos..end) else ""
+        pos = end + 1
+        if line.len > 0 {
+            (mut result).push(line)
+        }
+    }
+    result
+}
+
+/// Run spec tests in DIR. Handles both valid/ (compare) and invalid/ (reject).
+fn spec_run(dir: str, verbose: bool, only: str) -> !int {
+    // Read the 1.0 file list
+    let file_list = read_1_0_list(dir)
+    var valid_passed = 0
+    var valid_total = 0
+    var invalid_passed = 0
+    var invalid_total = 0
+    var e = 0
+    while e < file_list.len {
+        let rel = file_list[e]
+        e = e + 1
+        if only.len > 0 && !rel.starts_with(only) {
+            continue
+        }
+        // Skip .json files (they are twins, not tests)
+        if rel.ends_with(".json") {
+            continue
+        }
+        let toml_path = dir + "/" + rel
+        // Determine if this is a valid or invalid test
+        let is_invalid = rel.starts_with("invalid/")
+        // Read the TOML file
+        let text = fs.read_text(toml_path) else |err| {
+            if is_invalid {
+                // Rejection at read level counts as a pass for invalid tests
+                invalid_passed = invalid_passed + 1
+                invalid_total = invalid_total + 1
+                if verbose {
+                    print("PASS {rel} (rejected: {err})")
+                }
+            } else {
+                print("FAIL {rel}: {err}")
+                valid_total = valid_total + 1
+            }
+            continue
+        }
+        // Parse the TOML
+        var p = parser_init(text)
+        let root = parse_document(mut p) else |e| match e {
+            ParseError(l, c, m) => {
+                // Parse failed
+                if is_invalid {
+                    // Expected rejection
+                    invalid_passed = invalid_passed + 1
+                    invalid_total = invalid_total + 1
+                    if verbose {
+                        print("PASS {rel} (rejected: {m})")
+                    }
+                } else {
+                    // Unexpected rejection
+                    valid_total = valid_total + 1
+                    if verbose {
+                        print("FAIL {rel}:{l}:{c}: {m}")
+                    }
+                }
+                continue
+            },
+        }
+        // Parse succeeded
+        if is_invalid {
+            // Should have been rejected
+            invalid_total = invalid_total + 1
+            if verbose {
+                print("FAIL {rel} (accepted, should reject)")
+            }
+        } else {
+            // Valid test: compare against .json twin
+            valid_total = valid_total + 1
+            let base = rel.get(0..rel.len - 5) else ""
+            let json_name2 = base + ".json"
+            let expected_path = dir + "/" + json_name2
+            let expected = fs.read_text(expected_path) else |err| {
+                if verbose {
+                    print("SKIP {rel}: {err}")
+                }
+                continue
+            }
+            let actual = emit_tagged(p.arena, root) else |e| match e {
+                ParseError(l, c, m) => {
+                    if verbose {
+                        print("FAIL {rel}:{l}:{c}: {m}")
+                    }
+                    continue
+                },
+            }
+            if json_equal(actual, expected) {
+                valid_passed = valid_passed + 1
+                if verbose {
+                    print("PASS {rel}")
+                }
+            } else if verbose {
+                print("FAIL {rel}")
+            }
+        }
+    }
+    print("valid: {valid_passed}/{valid_total} passed")
+    print("invalid: {invalid_passed}/{invalid_total} passed")
+    if valid_passed < valid_total || invalid_passed < invalid_total {
+        return 1
+    }
+    0
+}
+
+fn main() -> !int {
+    let args = env_args()
+    if args.len == 0 {
+        return usage()
+    }
+    if args[0] == "--version" {
+        print("tomlq 0.1.0")
+        return 0
+    }
+    if args[0] == "--help" {
+        return usage()
+    }
+    if args[0] == "--test-lexer" {
+        return lexer_main()
+    }
+    if args[0] == "--tokens" {
+        if args.len < 2 {
+            print("tomlq: missing file argument")
+            return 2
+        }
+        return tokens_file(args[1])
+    }
+    if args[0] == "--json" {
+        if args.len < 2 {
+            print("tomlq: missing file argument")
+            return 2
+        }
+        return json_file(args[1])
+    }
+    if args[0] == "--tagged" {
+        if args.len < 2 {
+            print("tomlq: missing file argument")
+            return 2
+        }
+        return tagged_file(args[1])
+    }
+    if args[0] == "--keys" {
+        if args.len < 3 {
+            print("tomlq: usage: tomlq --keys PATH FILE")
+            return 2
+        }
+        return query_file(args[1], args[2], "keys")
+    }
+    if args[0] == "--len" {
+        if args.len < 3 {
+            print("tomlq: usage: tomlq --len PATH FILE")
+            return 2
+        }
+        return query_file(args[1], args[2], "len")
+    }
+    if args[0] == "--raw" {
+        if args.len < 3 {
+            print("tomlq: usage: tomlq --raw PATH FILE")
+            return 2
+        }
+        return query_file(args[1], args[2], "raw")
+    }
+    if args[0] == "--spec" {
+        if args.len < 2 {
+            print("tomlq: missing directory argument")
+            return 2
+        }
+        let dir = args[1]
+        var verbose = false
+        var only = ""
+        var i = 2
+        while i < args.len {
+            if args[i] == "--spec-verbose" {
+                verbose = true
+            } else if args[i] == "--only" {
+                i = i + 1
+                if i < args.len {
+                    only = args[i]
+                }
+            }
+            i = i + 1
+        }
+        return spec_run(dir, verbose, only)
+    }
+    // Check for PATH FILE form (no flag)
+    if args.len >= 2 && !args[0].starts_with("-") {
+        return query_file(args[0], args[1], "json")
+    }
+    return not_implemented()
+}

@@ -1,0 +1,190 @@
+//! check: run(exit=0)
+
+/// Arena node. kind: 0 table, 1 array, 2 string, 3 integer, 4 float, 5 bool,
+/// 6 datetime, 7 datetime-local, 8 date-local, 9 time-local.
+struct Node {
+    kind: int,
+    b: bool,
+    i: int,
+    f: f64,
+    s: str,
+    kids: List[int],
+    keys: List[str],
+    defined_by: int,
+}
+
+/// Create a new table node in the arena. Returns its index.
+fn table_node(mut arena: List[Node], defined_by: int) -> int {
+    let n = Node {
+        kind: 0,
+        b: false,
+        i: 0,
+        f: 0.0,
+        s: "",
+        kids: List[int](),
+        keys: List[str](),
+        defined_by: defined_by,
+    }
+    (mut arena).push(n)
+    arena.len - 1
+}
+
+/// Create a new array node in the arena. Returns its index.
+fn array_node(mut arena: List[Node]) -> int {
+    let n = Node {
+        kind: 1,
+        b: false,
+        i: 0,
+        f: 0.0,
+        s: "",
+        kids: List[int](),
+        keys: List[str](),
+        defined_by: 0,
+    }
+    (mut arena).push(n)
+    arena.len - 1
+}
+
+/// Create a new string node. Returns its index.
+fn string_node(mut arena: List[Node], s: str) -> int {
+    let n = Node {
+        kind: 2,
+        b: false,
+        i: 0,
+        f: 0.0,
+        s: s,
+        kids: List[int](),
+        keys: List[str](),
+        defined_by: 0,
+    }
+    (mut arena).push(n)
+    arena.len - 1
+}
+
+/// Create a new integer node. Returns its index.
+fn int_node(mut arena: List[Node], i: int) -> int {
+    let n = Node {
+        kind: 3,
+        b: false,
+        i: i,
+        f: 0.0,
+        s: "",
+        kids: List[int](),
+        keys: List[str](),
+        defined_by: 0,
+    }
+    (mut arena).push(n)
+    arena.len - 1
+}
+
+/// Create a new float node. Returns its index.
+fn float_node(mut arena: List[Node], f: f64) -> int {
+    let n = Node {
+        kind: 4,
+        b: false,
+        i: 0,
+        f: f,
+        s: "",
+        kids: List[int](),
+        keys: List[str](),
+        defined_by: 0,
+    }
+    (mut arena).push(n)
+    arena.len - 1
+}
+
+/// Create a new bool node. Returns its index.
+fn bool_node(mut arena: List[Node], b: bool) -> int {
+    let n = Node {
+        kind: 5,
+        b: b,
+        i: 0,
+        f: 0.0,
+        s: "",
+        kids: List[int](),
+        keys: List[str](),
+        defined_by: 0,
+    }
+    (mut arena).push(n)
+    arena.len - 1
+}
+
+/// Create a new datetime node. Returns its index.
+fn datetime_node(mut arena: List[Node], s: str, kind: int) -> int {
+    let n = Node {
+        kind: kind,
+        b: false,
+        i: 0,
+        f: 0.0,
+        s: s,
+        kids: List[int](),
+        keys: List[str](),
+        defined_by: 0,
+    }
+    (mut arena).push(n)
+    arena.len - 1
+}
+
+/// Add a child to a table or array node.
+fn add_child(mut arena: List[Node], parent: int, child: int) {
+    (mut arena[parent].kids).push(child)
+}
+
+/// Add a key-value pair to a table node.
+fn add_key(mut arena: List[Node], parent: int, key: str, child: int) {
+    (mut arena[parent].keys).push(key)
+    (mut arena[parent].kids).push(child)
+}
+
+/// Get the kind of a node.
+fn node_kind(arena: List[Node], i: int) -> int {
+    arena[i].kind
+}
+
+/// Get the string value of a node.
+fn node_str(arena: List[Node], i: int) -> str {
+    arena[i].s
+}
+
+/// Get the integer value of a node.
+fn node_int(arena: List[Node], i: int) -> int {
+    arena[i].i
+}
+
+/// Get the float value of a node.
+fn node_float(arena: List[Node], i: int) -> f64 {
+    arena[i].f
+}
+
+/// Get the bool value of a node.
+fn node_bool(arena: List[Node], i: int) -> bool {
+    arena[i].b
+}
+
+/// Get the children of a node.
+fn node_kids(arena: List[Node], i: int) -> List[int] {
+    copy arena[i].kids
+}
+
+/// Get the keys of a table node.
+fn node_keys(arena: List[Node], i: int) -> List[str] {
+    copy arena[i].keys
+}
+
+/// Get the defined_by of a node.
+fn node_defined_by(arena: List[Node], i: int) -> int {
+    arena[i].defined_by
+}
+
+fn tree_main() -> !int {
+    var arena = List[Node]()
+    let root = table_node(mut arena, 0)
+    let t = table_node(mut arena, 1)
+    add_key(mut arena, root, "table", t)
+    let s = string_node(mut arena, "hello")
+    add_key(mut arena, t, "key", s)
+    print("root kind: {node_kind(arena, root)}")
+    print("table kind: {node_kind(arena, t)}")
+    print("string: {node_str(arena, s)}")
+    0
+}

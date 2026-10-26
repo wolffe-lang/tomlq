@@ -1,0 +1,8 @@
+Stop tracing multiline-quotes.toml by hand; the lexer is fine on the opening side. The real error is the message you got: `ParseError(4, 28, control character in literal string)`. Column 28 is the newline at the end of line 4. Your closing check fires on the FIRST three quotes of `''''`, so the string closes one quote early, the fourth `'` starts a new literal string, and that string runs into the newline.
+
+The rule (TOML 1.0, both `'''` and `"""`): when you see three closing quotes, count the whole run of quotes. A run of 4 or 5 means the first 1 or 2 quotes are content and the LAST three close the string. A run longer than 5 is invalid. Fix that in both multi-line parsers, rebuild, and rerun `--tokens` on `valid/string/multiline-quotes.toml` (it also has the four-quotes and five-quotes `"""` cases). hex-escape.toml is 1.1 only; skip it.
+
+Then finish the invalid half and list what is left. Of the 9 `invalid/string` files still accepted, four are lexer rules: in a `"""` string a backslash followed by spaces or tabs is only a line-ending backslash if nothing but whitespace comes before the newline (`k = """t\ t"""` and `"""t\ """` are invalid escapes; `foo \ \n` and `gee \   """` too). The other five (missing-quotes*, bad-concat, text-after-string) need key/value structure and belong to Phase 3, so list them as "not yet" and stop. Paste the two commands and their counts:
+
+for t in toml-test/tests/valid/string/*.toml; do ./tomlq --tokens "$t" >/dev/null 2>&1 || echo "FAIL $t"; done
+for t in toml-test/tests/invalid/string/*.toml; do ./tomlq --tokens "$t" >/dev/null 2>&1 && echo "ACCEPTED $t"; done

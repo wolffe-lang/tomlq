@@ -1,0 +1,1394 @@
+//! check: run(exit=0)
+
+use std.strbuf
+
+/// A cursor into a byte string, tracking line and column.
+struct Cursor {
+    s: str,
+    pos: int,
+    line: int,
+    col: int,
+}
+
+/// Create a cursor at the start of a string.
+fn cursor_init(s: str) -> Cursor {
+    Cursor { s: s, pos: 0, line: 1, col: 1 }
+}
+
+/// Advance the cursor by one byte, updating line/col for newlines.
+fn cursor_advance(mut c: Cursor) {
+    if c.pos >= c.s.len {
+        return
+    }
+    // Check if the byte we're about to pass is a newline
+    let ch = c.s.get(c.pos..c.pos + 1) else ""
+    c.pos = c.pos + 1
+    if ch == "\n" {
+        c.line = c.line + 1
+        c.col = 1
+    } else {
+        c.col = c.col + 1
+    }
+}
+
+/// Peek at the byte at the current position, or "" if at end.
+fn cursor_peek(c: Cursor) -> str {
+    if c.pos >= c.s.len {
+        return ""
+    }
+    c.s.get(c.pos..c.pos + 1) else ""
+}
+
+/// Check if the cursor is at end of input.
+fn cursor_at_end(c: Cursor) -> bool {
+    c.pos >= c.s.len
+}
+
+/// Skip whitespace only (not comments). Returns true if something was skipped.
+fn cursor_skip_ws(mut c: Cursor) -> bool {
+    var changed = false
+    while !cursor_at_end(c) {
+        let ch = cursor_peek(c)
+        if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
+            cursor_advance(mut c)
+            changed = true
+        } else {
+            break
+        }
+    }
+    changed
+}
+
+/// Skip whitespace and comments. Returns true if something was skipped.
+fn cursor_skip_ws_comment(mut c: Cursor) -> bool {
+    var changed = false
+    while !cursor_at_end(c) {
+        let ch = cursor_peek(c)
+        if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
+            cursor_advance(mut c)
+            changed = true
+        } else if ch == "#" {
+            // Skip to end of line
+            while !cursor_at_end(c) {
+                let ch2 = cursor_peek(c)
+                if ch2 == "\n" {
+                    break
+                }
+                cursor_advance(mut c)
+            }
+            changed = true
+        } else {
+            break
+        }
+    }
+    changed
+}
+
+/// Parse a hex digit. Returns the value or -1 if not a hex digit.
+fn parse_hex_digit(ch: str) -> int {
+    if ch == "0" { return 0 }
+    if ch == "1" { return 1 }
+    if ch == "2" { return 2 }
+    if ch == "3" { return 3 }
+    if ch == "4" { return 4 }
+    if ch == "5" { return 5 }
+    if ch == "6" { return 6 }
+    if ch == "7" { return 7 }
+    if ch == "8" { return 8 }
+    if ch == "9" { return 9 }
+    if ch == "a" || ch == "A" { return 10 }
+    if ch == "b" || ch == "B" { return 11 }
+    if ch == "c" || ch == "C" { return 12 }
+    if ch == "d" || ch == "D" { return 13 }
+    if ch == "e" || ch == "E" { return 14 }
+    if ch == "f" || ch == "F" { return 15 }
+    -1
+}
+
+/// Parse N hex digits from the cursor. Returns the value or -1 if not enough digits.
+fn parse_hex_n(mut c: Cursor, n: int) -> int {
+    var val = 0
+    var i = 0
+    while i < n {
+        let ch = cursor_peek(c)
+        let d = parse_hex_digit(ch)
+        if d < 0 {
+            return -1
+        }
+        val = val * 16 + d
+        cursor_advance(mut c)
+        i = i + 1
+    }
+    val
+}
+
+/// Check if a single-character string is a control character (0x00..0x1F except tab).
+fn is_control(ch: str) -> bool {
+    if ch == "\t" {
+        return false
+    }
+    if ch == "\n" {
+        return true
+    }
+    if ch == "\r" {
+        return true
+    }
+    if ch == "\x08" {
+        return true
+    }
+    if ch == "\x0C" {
+        return true
+    }
+    // Check for other control characters by comparing with known ranges
+    if ch.len == 1 {
+        // For single-byte characters, we can check if they're in the control range
+        // by comparing with known boundary characters
+        if ch < " " {
+            return true
+        }
+    }
+    false
+}
+
+/// Decode a Unicode code point to a UTF-8 string.
+fn code_point_to_str(cp: int) -> str {
+    // Use strbuf to build the string from individual characters
+    var b = strbuf.new()
+    strbuf.push(mut b, cp as char)
+    strbuf.to_str(b)
+}
+
+/// Parse a basic string (double-quoted). Returns the decoded string or raises an error.
+fn parse_basic_string(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
+    // Opening quote already consumed
+    var result = ""
+    while !cursor_at_end(c) {
+        let ch = cursor_peek(c)
+        if ch == "\"" {
+            cursor_advance(mut c)
+            return result
+        }
+        if ch == "\\" {
+            cursor_advance(mut c)
+            let esc = cursor_peek(c)
+            if esc == "" {
+                return ParseError(c.line, c.col, "unexpected end of string after \\")
+            }
+            cursor_advance(mut c)
+            if esc == "b" {
+                result = result + "\x08"
+            } else if esc == "t" {
+                result = result + "\t"
+            } else if esc == "n" {
+                result = result + "\n"
+            } else if esc == "f" {
+                result = result + "\x0C"
+            } else if esc == "r" {
+                result = result + "\r"
+            } else if esc == "\"" {
+                result = result + "\""
+            } else if esc == "\\" {
+                result = result + "\\"
+            } else if esc == "e" {
+                result = result + "\x1B"
+            } else if esc == "u" {
+                let val = parse_hex_n(mut c, 4)
+                if val < 0 {
+                    return ParseError(c.line, c.col, "invalid \\u escape")
+                }
+                // Check for surrogate code points (U+D800..U+DFFF)
+                if val >= 0xD800 && val <= 0xDFFF {
+                    return ParseError(c.line, c.col, "surrogate code point in \\u escape")
+                }
+                if val > 0x10FFFF {
+                    return ParseError(c.line, c.col, "unicode code point out of range")
+                }
+                result = result + code_point_to_str(val)
+            } else if esc == "U" {
+                let val = parse_hex_n(mut c, 8)
+                if val < 0 {
+                    return ParseError(c.line, c.col, "invalid \\U escape")
+                }
+                // Check for surrogate code points
+                if val >= 0xD800 && val <= 0xDFFF {
+                    return ParseError(c.line, c.col, "surrogate code point in \\U escape")
+                }
+                if val > 0x10FFFF {
+                    return ParseError(c.line, c.col, "unicode code point out of range")
+                }
+                result = result + code_point_to_str(val)
+            } else {
+                return ParseError(c.line, c.col, "invalid escape \\{esc}")
+            }
+        } else {
+            // Check for control characters (0x00..0x1F except tab)
+            if is_control(ch) {
+                return ParseError(c.line, c.col, "control character in string")
+            }
+            result = result + ch
+            cursor_advance(mut c)
+        }
+    }
+    return ParseError(c.line, c.col, "unexpected end of input in string")
+}
+
+/// Parse a literal string (single-quoted). Returns the decoded string or raises an error.
+fn parse_literal_string(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
+    // Opening quote already consumed
+    var result = ""
+    while !cursor_at_end(c) {
+        let ch = cursor_peek(c)
+        if ch == "'" {
+            cursor_advance(mut c)
+            return result
+        }
+        if ch == "\\" || ch == "\"" {
+            // These are just literal characters in a literal string
+            result = result + ch
+            cursor_advance(mut c)
+        } else {
+            // Check for control characters and newlines
+            if is_control(ch) || ch == "\n" {
+                return ParseError(c.line, c.col, "control character in literal string")
+            }
+            result = result + ch
+            cursor_advance(mut c)
+        }
+    }
+    return ParseError(c.line, c.col, "unexpected end of input in literal string")
+}
+
+/// Count consecutive quote characters at the current position.
+fn count_quotes(mut c: Cursor, q: str) -> int {
+    var n = 0
+    while !cursor_at_end(c) {
+        let ch = cursor_peek(c)
+        if ch == q {
+            cursor_advance(mut c)
+            n = n + 1
+        } else {
+            break
+        }
+    }
+    n
+}
+
+/// Parse a multi-line basic string ("""). Returns the decoded string or raises an error.
+fn parse_multiline_basic_string(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
+    // Opening """ already consumed
+    var result = ""
+    var after_open = true
+    while !cursor_at_end(c) {
+        // Check for closing """
+        let rest = c.s.get(c.pos..) else ""
+        if rest.starts_with("\"\"\"") {
+            // Count the whole run of quotes
+            var temp = copy c
+            let n = count_quotes(mut temp, "\"")
+            if n == 3 {
+                // Exactly 3 quotes: close the string
+                cursor_advance(mut c)
+                cursor_advance(mut c)
+                cursor_advance(mut c)
+                return result
+            } else if n == 4 || n == 5 {
+                // 4 or 5 quotes: first n-3 are content, last 3 close
+                var i = 0
+                while i < n - 3 {
+                    result = result + "\""
+                    cursor_advance(mut c)
+                    i = i + 1
+                }
+                cursor_advance(mut c)
+                cursor_advance(mut c)
+                cursor_advance(mut c)
+                return result
+            } else {
+                // More than 5 quotes: invalid
+                return ParseError(c.line, c.col, "too many closing quotes in multi-line string")
+            }
+        }
+        let ch = cursor_peek(c)
+        if ch == "\\" {
+            cursor_advance(mut c)
+            let esc = cursor_peek(c)
+            if esc == "" {
+                return ParseError(c.line, c.col, "unexpected end of string after \\")
+            }
+            cursor_advance(mut c)
+            if esc == "b" {
+                result = result + "\x08"
+            } else if esc == "t" {
+                result = result + "\t"
+            } else if esc == "n" {
+                result = result + "\n"
+            } else if esc == "f" {
+                result = result + "\x0C"
+            } else if esc == "r" {
+                result = result + "\r"
+            } else if esc == "\"" {
+                result = result + "\""
+            } else if esc == "\\" {
+                result = result + "\\"
+            } else if esc == "e" {
+                result = result + "\x1B"
+            } else if esc == "u" {
+                let val = parse_hex_n(mut c, 4)
+                if val < 0 {
+                    return ParseError(c.line, c.col, "invalid \\u escape")
+                }
+                if val >= 0xD800 && val <= 0xDFFF {
+                    return ParseError(c.line, c.col, "surrogate code point in \\u escape")
+                }
+                if val > 0x10FFFF {
+                    return ParseError(c.line, c.col, "unicode code point out of range")
+                }
+                result = result + code_point_to_str(val)
+            } else if esc == "U" {
+                let val = parse_hex_n(mut c, 8)
+                if val < 0 {
+                    return ParseError(c.line, c.col, "invalid \\U escape")
+                }
+                if val >= 0xD800 && val <= 0xDFFF {
+                    return ParseError(c.line, c.col, "surrogate code point in \\U escape")
+                }
+                if val > 0x10FFFF {
+                    return ParseError(c.line, c.col, "unicode code point out of range")
+                }
+                result = result + code_point_to_str(val)
+            } else if esc == "\n" || esc == "\r" {
+                // Line continuation: \ followed by newline
+                if esc == "\r" {
+                    let next = cursor_peek(c)
+                    if next == "\n" {
+                        cursor_advance(mut c)
+                    }
+                }
+            } else if esc == " " || esc == "\t" {
+                // \ followed by whitespace: only valid if the rest of the line is whitespace
+                // Skip whitespace (spaces and tabs) until newline or non-whitespace
+                while !cursor_at_end(c) {
+                    let ws = cursor_peek(c)
+                    if ws == " " || ws == "\t" {
+                        cursor_advance(mut c)
+                    } else {
+                        break
+                    }
+                }
+                // If we're at a newline, consume it (line continuation)
+                let after_ws = cursor_peek(c)
+                if after_ws == "\n" {
+                    cursor_advance(mut c)
+                } else if after_ws == "\r" {
+                    cursor_advance(mut c)
+                    let next2 = cursor_peek(c)
+                    if next2 == "\n" {
+                        cursor_advance(mut c)
+                    }
+                } else {
+                    // Not followed by newline: invalid escape
+                    return ParseError(c.line, c.col, "invalid escape \\{esc}")
+                }
+            } else {
+                return ParseError(c.line, c.col, "invalid escape \\{esc}")
+            }
+        } else if ch == "\"" {
+            // A lone " or "" inside """ is just content
+            result = result + ch
+            cursor_advance(mut c)
+        } else {
+            // Check for control characters (0x00..0x1F except tab and newline)
+            if is_control(ch) && ch != "\n" && ch != "\r" {
+                return ParseError(c.line, c.col, "control character in string")
+            }
+            // Handle the newline immediately after opening """
+            if after_open {
+                if ch == "\n" {
+                    cursor_advance(mut c)
+                    after_open = false
+                    continue
+                } else if ch == "\r" {
+                    cursor_advance(mut c)
+                    let next = cursor_peek(c)
+                    if next == "\n" {
+                        cursor_advance(mut c)
+                    }
+                    after_open = false
+                    continue
+                }
+                after_open = false
+            }
+            result = result + ch
+            cursor_advance(mut c)
+        }
+    }
+    return ParseError(c.line, c.col, "unexpected end of input in multi-line string")
+}
+
+/// Parse a multi-line literal string ('''). Returns the decoded string or raises an error.
+fn parse_multiline_literal_string(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
+    // Opening ''' already consumed
+    var result = ""
+    var after_open = true
+    while !cursor_at_end(c) {
+        // Check for closing '''
+        let rest = c.s.get(c.pos..) else ""
+        if rest.starts_with("'''") {
+            // Count the whole run of quotes
+            var temp = copy c
+            let n = count_quotes(mut temp, "'")
+            if n == 3 {
+                // Exactly 3 quotes: close the string
+                cursor_advance(mut c)
+                cursor_advance(mut c)
+                cursor_advance(mut c)
+                return result
+            } else if n == 4 || n == 5 {
+                // 4 or 5 quotes: first n-3 are content, last 3 close
+                var i = 0
+                while i < n - 3 {
+                    result = result + "'"
+                    cursor_advance(mut c)
+                    i = i + 1
+                }
+                cursor_advance(mut c)
+                cursor_advance(mut c)
+                cursor_advance(mut c)
+                return result
+            } else {
+                // More than 5 quotes: invalid
+                return ParseError(c.line, c.col, "too many closing quotes in multi-line string")
+            }
+        }
+        let ch = cursor_peek(c)
+        if ch == "'" {
+            // A lone ' or '' inside ''' is just content
+            result = result + ch
+            cursor_advance(mut c)
+        } else {
+            // Check for control characters (0x00..0x1F except tab and newline)
+            if is_control(ch) && ch != "\n" && ch != "\r" {
+                return ParseError(c.line, c.col, "control character in literal string")
+            }
+            // Handle the newline immediately after opening '''
+            if after_open {
+                if ch == "\n" {
+                    cursor_advance(mut c)
+                    after_open = false
+                    continue
+                } else if ch == "\r" {
+                    cursor_advance(mut c)
+                    let next = cursor_peek(c)
+                    if next == "\n" {
+                        cursor_advance(mut c)
+                    }
+                    after_open = false
+                    continue
+                }
+                after_open = false
+            }
+            result = result + ch
+            cursor_advance(mut c)
+        }
+    }
+    return ParseError(c.line, c.col, "unexpected end of input in multi-line literal string")
+}
+
+/// Parse a string starting at the current cursor position.
+/// The opening quote must be at the cursor.
+fn parse_string(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
+    let rest = c.s.get(c.pos..) else ""
+    if rest.starts_with("\"\"\"") {
+        cursor_advance(mut c)
+        cursor_advance(mut c)
+        cursor_advance(mut c)
+        return parse_multiline_basic_string(mut c)
+    }
+    if rest.starts_with("'''") {
+        cursor_advance(mut c)
+        cursor_advance(mut c)
+        cursor_advance(mut c)
+        return parse_multiline_literal_string(mut c)
+    }
+    if rest.starts_with("\"") {
+        cursor_advance(mut c)
+        return parse_basic_string(mut c)
+    }
+    if rest.starts_with("'") {
+        cursor_advance(mut c)
+        return parse_literal_string(mut c)
+    }
+    return ParseError(c.line, c.col, "expected string literal")
+}
+
+/// Tokenize a string value. Returns the decoded string.
+fn tokenize_string(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
+    parse_string(mut c)
+}
+
+/// Parse an integer. Returns the raw text of the integer.
+fn parse_integer(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
+    var result = ""
+    // Check for base prefix first (no sign allowed for non-decimal)
+    let rest = c.s.get(c.pos..) else ""
+    if rest.starts_with("0b") || rest.starts_with("0B") {
+        // Binary
+        result = result + "0b"
+        cursor_advance(mut c)
+        cursor_advance(mut c)
+        // Must have at least one digit
+        let ch = cursor_peek(c)
+        if ch != "0" && ch != "1" {
+            return ParseError(c.line, c.col, "invalid binary integer")
+        }
+        while !cursor_at_end(c) {
+            let ch = cursor_peek(c)
+            if ch == "0" || ch == "1" {
+                result = result + ch
+                cursor_advance(mut c)
+            } else if ch == "_" {
+                // Underscore separator
+                cursor_advance(mut c)
+                let next = cursor_peek(c)
+                if next == "0" || next == "1" {
+                    result = result + "_"
+                } else {
+                    return ParseError(
+                        c.line,
+                        c.col,
+                        "invalid character after underscore in integer",
+                    )
+                }
+            } else {
+                break
+            }
+        }
+        return result
+    }
+    if rest.starts_with("0o") || rest.starts_with("0O") {
+        // Octal
+        result = result + "0o"
+        cursor_advance(mut c)
+        cursor_advance(mut c)
+        // Must have at least one digit
+        let ch = cursor_peek(c)
+        if ch < "0" || ch > "7" {
+            return ParseError(c.line, c.col, "invalid octal integer")
+        }
+        while !cursor_at_end(c) {
+            let ch = cursor_peek(c)
+            if ch >= "0" && ch <= "7" {
+                result = result + ch
+                cursor_advance(mut c)
+            } else if ch == "_" {
+                cursor_advance(mut c)
+                let next = cursor_peek(c)
+                if next >= "0" && next <= "7" {
+                    result = result + "_"
+                } else {
+                    return ParseError(
+                        c.line,
+                        c.col,
+                        "invalid character after underscore in integer",
+                    )
+                }
+            } else {
+                break
+            }
+        }
+        return result
+    }
+    if rest.starts_with("0x") || rest.starts_with("0X") {
+        // Hexadecimal
+        result = result + "0x"
+        cursor_advance(mut c)
+        cursor_advance(mut c)
+        // Must have at least one digit
+        let ch = cursor_peek(c)
+        if !is_hex_char(ch) {
+            return ParseError(c.line, c.col, "invalid hexadecimal integer")
+        }
+        while !cursor_at_end(c) {
+            let ch = cursor_peek(c)
+            if is_hex_char(ch) {
+                result = result + ch
+                cursor_advance(mut c)
+            } else if ch == "_" {
+                cursor_advance(mut c)
+                let next = cursor_peek(c)
+                if is_hex_char(next) {
+                    result = result + "_"
+                } else {
+                    return ParseError(
+                        c.line,
+                        c.col,
+                        "invalid character after underscore in integer",
+                    )
+                }
+            } else {
+                break
+            }
+        }
+        return result
+    }
+    // Decimal: optional sign
+    let sign = cursor_peek(c)
+    if sign == "+" || sign == "-" {
+        result = result + sign
+        cursor_advance(mut c)
+        // After sign, check if it's a non-decimal integer (invalid)
+        let rest2 = c.s.get(c.pos..) else ""
+        if rest2.starts_with("0b") ||
+            rest2.starts_with("0B") ||
+            rest2.starts_with("0o") ||
+            rest2.starts_with("0O") ||
+            rest2.starts_with("0x") ||
+            rest2.starts_with("0X") {
+            return ParseError(c.line, c.col, "sign not allowed on non-decimal integer")
+        }
+    }
+    // Check for leading zero (invalid unless it's just "0")
+    let first = cursor_peek(c)
+    if first == "0" {
+        let next = c.s.get(c.pos + 1..c.pos + 2) else ""
+        if next.starts_with("_") || next.len > 0 && next[0..1] >= "0" && next[0..1] <= "9" {
+            return ParseError(c.line, c.col, "leading zeros in integer")
+        }
+    }
+    // Parse digits
+    while !cursor_at_end(c) {
+        let ch = cursor_peek(c)
+        if ch >= "0" && ch <= "9" {
+            result = result + ch
+            cursor_advance(mut c)
+        } else if ch == "_" {
+            cursor_advance(mut c)
+            let next = cursor_peek(c)
+            if next >= "0" && next <= "9" {
+                result = result + "_"
+                // Don't advance yet; the next iteration will consume the digit
+            } else {
+                return ParseError(c.line, c.col, "invalid character after underscore in integer")
+            }
+        } else {
+            break
+        }
+    }
+    if result == "" || result == "+" || result == "-" {
+        return ParseError(c.line, c.col, "empty integer")
+    }
+    result
+}
+
+/// Check if a character is a hex digit.
+fn is_hex_char(ch: str) -> bool {
+    if ch >= "0" && ch <= "9" {
+        return true
+    }
+    if ch >= "a" && ch <= "f" {
+        return true
+    }
+    if ch >= "A" && ch <= "F" {
+        return true
+    }
+    false
+}
+
+/// Parse a float. Returns the raw text of the float.
+fn parse_float(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
+    var result = ""
+    // Optional sign
+    let sign = cursor_peek(c)
+    if sign == "+" || sign == "-" {
+        result = result + sign
+        cursor_advance(mut c)
+    }
+    // Check for inf/nan
+    let rest = c.s.get(c.pos..) else ""
+    if rest.starts_with("inf") {
+        // Must be exactly "inf" (not followed by a letter, digit, or _)
+        let after = c.s.get(c.pos + 3..c.pos + 4) else ""
+        if after.len > 0 {
+            let ch = after[0..1]
+            if ch >= "a" && ch <= "z" ||
+                ch >= "A" && ch <= "Z" ||
+                ch >= "0" && ch <= "9" ||
+                ch == "_" {
+                return ParseError(c.line, c.col, "invalid float")
+            }
+        }
+        cursor_advance(mut c)
+        cursor_advance(mut c)
+        cursor_advance(mut c)
+        return "inf"
+    }
+    if rest.starts_with("nan") {
+        // Must be exactly "nan" (not followed by a letter, digit, or _)
+        let after = c.s.get(c.pos + 3..c.pos + 4) else ""
+        if after.len > 0 {
+            let ch = after[0..1]
+            if ch >= "a" && ch <= "z" ||
+                ch >= "A" && ch <= "Z" ||
+                ch >= "0" && ch <= "9" ||
+                ch == "_" {
+                return ParseError(c.line, c.col, "invalid float")
+            }
+        }
+        cursor_advance(mut c)
+        cursor_advance(mut c)
+        cursor_advance(mut c)
+        return "nan"
+    }
+    // Parse digits before decimal point
+    while !cursor_at_end(c) {
+        let ch = cursor_peek(c)
+        if ch >= "0" && ch <= "9" {
+            result = result + ch
+            cursor_advance(mut c)
+        } else if ch == "_" {
+            cursor_advance(mut c)
+            let next = cursor_peek(c)
+            if next >= "0" && next <= "9" {
+                result = result + "_"
+            } else {
+                return ParseError(c.line, c.col, "invalid character after underscore in float")
+            }
+        } else {
+            break
+        }
+    }
+    // Check for decimal point
+    let dot = cursor_peek(c)
+    if dot == "." {
+        result = result + "."
+        cursor_advance(mut c)
+        // Must have at least one digit after decimal point
+        let ch = cursor_peek(c)
+        if ch < "0" || ch > "9" {
+            return ParseError(c.line, c.col, "no digits after decimal point in float")
+        }
+        while !cursor_at_end(c) {
+            let ch = cursor_peek(c)
+            if ch >= "0" && ch <= "9" {
+                result = result + ch
+                cursor_advance(mut c)
+            } else if ch == "_" {
+                cursor_advance(mut c)
+                let next = cursor_peek(c)
+                if next >= "0" && next <= "9" {
+                    result = result + "_"
+                } else {
+                    return ParseError(c.line, c.col, "invalid character after underscore in float")
+                }
+            } else {
+                break
+            }
+        }
+    }
+    // Check for exponent
+    let exp = cursor_peek(c)
+    if exp == "e" || exp == "E" {
+        result = result + exp
+        cursor_advance(mut c)
+        // Optional sign
+        let sign2 = cursor_peek(c)
+        if sign2 == "+" || sign2 == "-" {
+            result = result + sign2
+            cursor_advance(mut c)
+        }
+        // Must have at least one digit
+        let ch = cursor_peek(c)
+        if ch < "0" || ch > "9" {
+            return ParseError(c.line, c.col, "no digits in exponent of float")
+        }
+        while !cursor_at_end(c) {
+            let ch = cursor_peek(c)
+            if ch >= "0" && ch <= "9" {
+                result = result + ch
+                cursor_advance(mut c)
+            } else if ch == "_" {
+                cursor_advance(mut c)
+                let next = cursor_peek(c)
+                if next >= "0" && next <= "9" {
+                    result = result + "_"
+                } else {
+                    return ParseError(c.line, c.col, "invalid character after underscore in float")
+                }
+            } else {
+                break
+            }
+        }
+    }
+    if result == "" || result == "+" || result == "-" {
+        return ParseError(c.line, c.col, "empty float")
+    }
+    result
+}
+
+/// Parse a boolean. Returns "true" or "false".
+fn parse_boolean(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
+    let rest = c.s.get(c.pos..) else ""
+    if rest.starts_with("true") {
+        cursor_advance(mut c)
+        cursor_advance(mut c)
+        cursor_advance(mut c)
+        cursor_advance(mut c)
+        return "true"
+    }
+    if rest.starts_with("false") {
+        cursor_advance(mut c)
+        cursor_advance(mut c)
+        cursor_advance(mut c)
+        cursor_advance(mut c)
+        cursor_advance(mut c)
+        return "false"
+    }
+    return ParseError(c.line, c.col, "invalid boolean")
+}
+
+/// Parse a date-time value. Returns the normalized text.
+fn parse_datetime(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
+    var result = ""
+    // Parse year (4 digits, no leading zeros beyond 4)
+    let year = parse_digits_n(mut c, 4)
+    if year < 0 {
+        return ParseError(c.line, c.col, "invalid year in date-time")
+    }
+    result = result + "{year}"
+    // Check for date-month separator
+    let sep = cursor_peek(c)
+    if sep != "-" {
+        return ParseError(c.line, c.col, "missing - in date-time")
+    }
+    result = result + "-"
+    cursor_advance(mut c)
+    // Parse month (01-12)
+    let month = parse_digits_n(mut c, 2)
+    if month < 1 || month > 12 {
+        return ParseError(c.line, c.col, "invalid month in date-time")
+    }
+    result = result + pad2(month)
+    // Check for date-mday separator
+    let sep2 = cursor_peek(c)
+    if sep2 != "-" {
+        return ParseError(c.line, c.col, "missing - in date-time")
+    }
+    result = result + "-"
+    cursor_advance(mut c)
+    // Parse day (01-31, validated later)
+    let day = parse_digits_n(mut c, 2)
+    if day < 1 || day > 31 {
+        return ParseError(c.line, c.col, "invalid day in date-time")
+    }
+    result = result + pad2(day)
+    // Check for time separator (T, t, or space)
+    let time_sep = cursor_peek(c)
+    if time_sep == "T" || time_sep == "t" {
+        // Time component
+        result = result + "T"
+        cursor_advance(mut c)
+        // Parse hour (00-23)
+        let hour = parse_digits_n(mut c, 2)
+        if hour < 0 || hour > 23 {
+            return ParseError(c.line, c.col, "invalid hour in date-time")
+        }
+        result = result + pad2(hour)
+        // Check for : separator
+        let sep3 = cursor_peek(c)
+        if sep3 != ":" {
+            return ParseError(c.line, c.col, "missing : in date-time")
+        }
+        result = result + ":"
+        cursor_advance(mut c)
+        // Parse minute (00-59)
+        let minute = parse_digits_n(mut c, 2)
+        if minute < 0 || minute > 59 {
+            return ParseError(c.line, c.col, "invalid minute in date-time")
+        }
+        result = result + pad2(minute)
+        // Optional seconds
+        let sep4 = cursor_peek(c)
+        if sep4 == ":" {
+            result = result + ":"
+            cursor_advance(mut c)
+            // Parse second (00-60, leap second)
+            let second = parse_digits_n(mut c, 2)
+            if second < 0 || second > 60 {
+                return ParseError(c.line, c.col, "invalid second in date-time")
+            }
+            result = result + pad2(second)
+            // Optional fractional seconds
+            let frac = cursor_peek(c)
+            if frac == "." {
+                result = result + "."
+                cursor_advance(mut c)
+                // Parse fractional digits
+                while !cursor_at_end(c) {
+                    let ch = cursor_peek(c)
+                    if ch >= "0" && ch <= "9" {
+                        result = result + ch
+                        cursor_advance(mut c)
+                    } else {
+                        break
+                    }
+                }
+            }
+        }
+        // Check for timezone
+        let tz = cursor_peek(c)
+        if tz == "Z" || tz == "z" {
+            result = result + "Z"
+            cursor_advance(mut c)
+        } else if tz == "+" || tz == "-" {
+            result = result + tz
+            cursor_advance(mut c)
+            // Parse offset hour (00-23)
+            let off_hour = parse_digits_n(mut c, 2)
+            if off_hour < 0 || off_hour > 23 {
+                return ParseError(c.line, c.col, "invalid offset hour in date-time")
+            }
+            result = result + pad2(off_hour)
+            // Check for : separator
+            let sep5 = cursor_peek(c)
+            if sep5 != ":" {
+                return ParseError(c.line, c.col, "missing : in date-time offset")
+            }
+            result = result + ":"
+            cursor_advance(mut c)
+            // Parse offset minute (00-59)
+            let off_minute = parse_digits_n(mut c, 2)
+            if off_minute < 0 || off_minute > 59 {
+                return ParseError(c.line, c.col, "invalid offset minute in date-time")
+            }
+            result = result + pad2(off_minute)
+        }
+    } else if time_sep == " " {
+        // Space separator: check if followed by a digit (hour)
+        cursor_advance(mut c)
+        let next = cursor_peek(c)
+        if next >= "0" && next <= "9" {
+            // Time component
+            result = result + "T"
+            // Parse hour (00-23)
+            let hour = parse_digits_n(mut c, 2)
+            if hour < 0 || hour > 23 {
+                return ParseError(c.line, c.col, "invalid hour in date-time")
+            }
+            result = result + pad2(hour)
+            // Check for : separator
+            let sep3 = cursor_peek(c)
+            if sep3 != ":" {
+                return ParseError(c.line, c.col, "missing : in date-time")
+            }
+            result = result + ":"
+            cursor_advance(mut c)
+            // Parse minute (00-59)
+            let minute = parse_digits_n(mut c, 2)
+            if minute < 0 || minute > 59 {
+                return ParseError(c.line, c.col, "invalid minute in date-time")
+            }
+            result = result + pad2(minute)
+            // Optional seconds
+            let sep4 = cursor_peek(c)
+            if sep4 == ":" {
+                result = result + ":"
+                cursor_advance(mut c)
+                // Parse second (00-60, leap second)
+                let second = parse_digits_n(mut c, 2)
+                if second < 0 || second > 60 {
+                    return ParseError(c.line, c.col, "invalid second in date-time")
+                }
+                result = result + pad2(second)
+                // Optional fractional seconds
+                let frac = cursor_peek(c)
+                if frac == "." {
+                    result = result + "."
+                    cursor_advance(mut c)
+                    // Parse fractional digits
+                    while !cursor_at_end(c) {
+                        let ch = cursor_peek(c)
+                        if ch >= "0" && ch <= "9" {
+                            result = result + ch
+                            cursor_advance(mut c)
+                        } else {
+                            break
+                        }
+                    }
+                }
+            }
+            // Check for timezone
+            let tz = cursor_peek(c)
+            if tz == "Z" || tz == "z" {
+                result = result + "Z"
+                cursor_advance(mut c)
+            } else if tz == "+" || tz == "-" {
+                result = result + tz
+                cursor_advance(mut c)
+                // Parse offset hour (00-23)
+                let off_hour = parse_digits_n(mut c, 2)
+                if off_hour < 0 || off_hour > 23 {
+                    return ParseError(c.line, c.col, "invalid offset hour in date-time")
+                }
+                result = result + pad2(off_hour)
+                // Check for : separator
+                let sep5 = cursor_peek(c)
+                if sep5 != ":" {
+                    return ParseError(c.line, c.col, "missing : in date-time offset")
+                }
+                result = result + ":"
+                cursor_advance(mut c)
+                // Parse offset minute (00-59)
+                let off_minute = parse_digits_n(mut c, 2)
+                if off_minute < 0 || off_minute > 59 {
+                    return ParseError(c.line, c.col, "invalid offset minute in date-time")
+                }
+                result = result + pad2(off_minute)
+            }
+        } else {
+            // Not a time component, stop here
+            return result
+        }
+    } else {
+        // No time component, stop here
+        return result
+    }
+    // Validate day for month
+    let m = month
+    let d = day
+    let max_day = days_in_month(m)
+    if d > max_day {
+        return ParseError(c.line, c.col, "invalid day for month in date-time")
+    }
+    result
+}
+
+/// Parse exactly N digits and return the value, or -1 if not enough digits.
+fn parse_digits_n(mut c: Cursor, n: int) -> int {
+    var val = 0
+    var i = 0
+    while i < n {
+        let ch = cursor_peek(c)
+        if ch < "0" || ch > "9" {
+            return -1
+        }
+        val = val * 10 + parse_hex_digit(ch)
+        cursor_advance(mut c)
+        i = i + 1
+    }
+    val
+}
+
+/// Pad a number to 2 digits.
+fn pad2(n: int) -> str {
+    if n < 10 {
+        "0{n}"
+    } else {
+        "{n}"
+    }
+}
+
+/// Return the maximum day for a month (1-indexed).
+fn days_in_month(month: int) -> int {
+    if month == 2 {
+        return 29 // We accept leap years; validation is done elsewhere
+    }
+    if month == 4 || month == 6 || month == 9 || month == 11 {
+        return 30
+    }
+    31
+}
+
+/// Parse a local time. Returns the normalized text.
+fn parse_local_time(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
+    var result = ""
+    // Parse hour (00-23)
+    let hour = parse_digits_n(mut c, 2)
+    if hour < 0 || hour > 23 {
+        return ParseError(c.line, c.col, "invalid hour in local time")
+    }
+    result = result + pad2(hour)
+    // Check for : separator
+    let sep = cursor_peek(c)
+    if sep != ":" {
+        return ParseError(c.line, c.col, "missing : in local time")
+    }
+    result = result + ":"
+    cursor_advance(mut c)
+    // Parse minute (00-59)
+    let minute = parse_digits_n(mut c, 2)
+    if minute < 0 || minute > 59 {
+        return ParseError(c.line, c.col, "invalid minute in local time")
+    }
+    result = result + pad2(minute)
+    // Optional seconds
+    let sep2 = cursor_peek(c)
+    if sep2 == ":" {
+        result = result + ":"
+        cursor_advance(mut c)
+        // Parse second (00-60, leap second)
+        let second = parse_digits_n(mut c, 2)
+        if second < 0 || second > 60 {
+            return ParseError(c.line, c.col, "invalid second in local time")
+        }
+        result = result + pad2(second)
+        // Optional fractional seconds
+        let frac = cursor_peek(c)
+        if frac == "." {
+            result = result + "."
+            cursor_advance(mut c)
+            // Parse fractional digits
+            while !cursor_at_end(c) {
+                let ch = cursor_peek(c)
+                if ch >= "0" && ch <= "9" {
+                    result = result + ch
+                    cursor_advance(mut c)
+                } else {
+                    break
+                }
+            }
+        }
+    }
+    result
+}
+
+/// Parse a local date. Returns the normalized text.
+fn parse_local_date(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
+    var result = ""
+    // Parse year (4 digits)
+    let year = parse_digits_n(mut c, 4)
+    if year < 0 {
+        return ParseError(c.line, c.col, "invalid year in local date")
+    }
+    result = result + "{year}"
+    // Check for - separator
+    let sep = cursor_peek(c)
+    if sep != "-" {
+        return ParseError(c.line, c.col, "missing - in local date")
+    }
+    result = result + "-"
+    cursor_advance(mut c)
+    // Parse month (01-12)
+    let month = parse_digits_n(mut c, 2)
+    if month < 1 || month > 12 {
+        return ParseError(c.line, c.col, "invalid month in local date")
+    }
+    result = result + pad2(month)
+    // Check for - separator
+    let sep2 = cursor_peek(c)
+    if sep2 != "-" {
+        return ParseError(c.line, c.col, "missing - in local date")
+    }
+    result = result + "-"
+    cursor_advance(mut c)
+    // Parse day (01-31)
+    let day = parse_digits_n(mut c, 2)
+    if day < 1 || day > 31 {
+        return ParseError(c.line, c.col, "invalid day in local date")
+    }
+    result = result + pad2(day)
+    // Validate day for month
+    let max_day = days_in_month(month)
+    if day > max_day {
+        return ParseError(c.line, c.col, "invalid day for month in local date")
+    }
+    result
+}
+
+/// Check if the byte at position i in s is an ASCII digit.
+fn is_digit(s: str, i: int) -> bool {
+    if i >= s.len {
+        return false
+    }
+    let b = s.get(i..i + 1) else ""
+    b >= "0" && b <= "9"
+}
+
+/// Determine the kind of value at the current cursor position.
+/// Returns: "string", "integer", "float", "bool", "datetime", "local-datetime", "local-date", "local-time", or ""
+fn peek_value_kind(c: Cursor) -> str {
+    let rest = c.s.get(c.pos..) else ""
+    if rest.starts_with("\"") || rest.starts_with("'") {
+        return "string"
+    }
+    if rest.starts_with("true") || rest.starts_with("false") {
+        return "bool"
+    }
+    if rest.starts_with("inf") || rest.starts_with("nan") {
+        return "float"
+    }
+    // Check for date-time: 4 digits followed by -
+    if rest.len >= 5 {
+        let d0 = is_digit(rest, 0)
+        let d1 = is_digit(rest, 1)
+        let d2 = is_digit(rest, 2)
+        let d3 = is_digit(rest, 3)
+        let dash = (rest.get(4..5) else "") == "-"
+        if d0 && d1 && d2 && d3 && dash {
+            // Could be a date or datetime
+            // Check if there's a time component
+            if rest.len >= 11 {
+                let ch10 = rest.get(10..11) else ""
+                if ch10 == "T" || ch10 == "t" || ch10 == " " {
+                    return "datetime"
+                }
+            }
+            return "local-date"
+        }
+    }
+    // Check for local time: 2 digits followed by :
+    if rest.len >= 3 {
+        let d0 = is_digit(rest, 0)
+        let d1 = is_digit(rest, 1)
+        let colon = (rest.get(2..3) else "") == ":"
+        if d0 && d1 && colon {
+            return "local-time"
+        }
+    }
+    // Check for number: scan ahead to determine if it's a float or integer
+    if rest.len >= 1 {
+        let first = rest.get(0..1) else ""
+        if first == "+" || first == "-" || first >= "0" && first <= "9" {
+            // Skip sign if present
+            var i = 0
+            if first == "+" || first == "-" {
+                i = 1
+            }
+            // Check for inf/nan after sign
+            if i < rest.len {
+                let after_sign = rest[i..]
+                if after_sign.starts_with("inf") || after_sign.starts_with("nan") {
+                    return "float"
+                }
+            }
+            // Scan ahead to see if there's a . or e/E within the number
+            while i < rest.len {
+                let ch = rest.get(i..i + 1) else ""
+                if ch >= "0" && ch <= "9" || ch == "_" {
+                    i = i + 1
+                } else if ch == "." {
+                    return "float"
+                } else if ch == "e" || ch == "E" {
+                    return "float"
+                } else {
+                    break
+                }
+            }
+            return "integer"
+        }
+    }
+    ""
+}
+
+/// Tokenize a value. Returns the kind and the raw text.
+fn tokenize_value(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
+    let kind = peek_value_kind(c)
+    if kind == "string" {
+        let v = parse_string(mut c)?
+        return "STR {v}"
+    }
+    if kind == "integer" {
+        let v = parse_integer(mut c)?
+        return "INT {v}"
+    }
+    if kind == "float" {
+        let v = parse_float(mut c)?
+        return "FLT {v}"
+    }
+    if kind == "bool" {
+        let v = parse_boolean(mut c)?
+        return "BOOL {v}"
+    }
+    if kind == "datetime" {
+        let v = parse_datetime(mut c)?
+        return "DATETIME {v}"
+    }
+    if kind == "local-date" {
+        let v = parse_local_date(mut c)?
+        return "LOCAL-DATE {v}"
+    }
+    if kind == "local-time" {
+        let v = parse_local_time(mut c)?
+        return "LOCAL-TIME {v}"
+    }
+    return ParseError(c.line, c.col, "unknown value kind")
+}
+
+fn lexer_main() -> !int {
+    // Test basic string parsing
+    var c = cursor_init("\"hello world\"")
+    let s = parse_string(mut c) else |err| {
+        print("error: {err}")
+        return 1
+    }
+    print("basic: {s}")
+
+    // Test escape sequences
+    var c2 = cursor_init("\"\\n\\t\\r\\b\\f\\\\\\\"\"")
+    let s2 = parse_string(mut c2) else |err| {
+        print("error: {err}")
+        return 1
+    }
+    print("escapes: {s2}")
+
+    // Test unicode escapes
+    var c3 = cursor_init("\"\\u00E9\\U0001F600\"")
+    let s3 = parse_string(mut c3) else |err| {
+        print("error: {err}")
+        return 1
+    }
+    print("unicode: {s3}")
+
+    // Test literal string
+    var c4 = cursor_init("'no escapes \\n here'")
+    let s4 = parse_string(mut c4) else |err| {
+        print("error: {err}")
+        return 1
+    }
+    print("literal: {s4}")
+
+    // Test multi-line basic string (newline after opening is trimmed)
+    var c5 = cursor_init("\"\"\"\nline one\nline two\"\"\"")
+    let s5 = parse_string(mut c5) else |err| {
+        print("error: {err}")
+        return 1
+    }
+    print("multiline: {s5}")
+
+    // Test multi-line literal string (newline after opening is trimmed)
+    var c6 = cursor_init("'''\nline one\nline two'''")
+    let s6 = parse_string(mut c6) else |err| {
+        print("error: {err}")
+        return 1
+    }
+    print("mliteral: {s6}")
+
+    // Test error: unterminated string
+    var c7 = cursor_init("\"unterminated")
+    let s7 = parse_string(mut c7) else |err| {
+        print("error (expected): {err}")
+        ""
+    }
+
+    // Test error: invalid escape
+    var c8 = cursor_init("\"bad \\a escape\"")
+    let s8 = parse_string(mut c8) else |err| {
+        print("error (expected): {err}")
+        ""
+    }
+
+    // Test error: surrogate code point
+    var c9 = cursor_init("\"\\uD800\"")
+    let s9 = parse_string(mut c9) else |err| {
+        print("error (expected): {err}")
+        ""
+    }
+
+    // Test error: out of range unicode
+    var c10 = cursor_init("\"\\UFFFFFFFF\"")
+    let s10 = parse_string(mut c10) else |err| {
+        print("error (expected): {err}")
+        ""
+    }
+
+    0
+}

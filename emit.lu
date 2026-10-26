@@ -1,0 +1,205 @@
+//! check: run(exit=0)
+
+use std.strbuf
+
+/// Emit a node as plain JSON.
+fn emit_json(arena: List[Node], i: int) -> str ! {ParseError(int, int, str)} {
+    var b = strbuf.new()
+    emit_json_node(mut b, arena, i)?
+    strbuf.to_str(b)
+}
+
+/// Emit a node as plain JSON into a strbuf.
+fn emit_json_node(mut b: strbuf.StrBuf, arena: List[Node], i: int) -> () ! {
+    ParseError(int, int, str),
+} {
+    let kind = node_kind(arena, i)
+    if kind == 0 {
+        emit_json_table(mut b, arena, i)?
+    } else if kind == 1 {
+        emit_json_array(mut b, arena, i)?
+    } else if kind == 2 {
+        emit_json_string(mut b, node_str(arena, i))
+    } else if kind == 3 {
+        strbuf.push_str(mut b, "{node_int(arena, i)}")
+    } else if kind == 4 {
+        strbuf.push_str(mut b, node_str(arena, i))
+    } else if kind == 5 {
+        if node_bool(arena, i) {
+            strbuf.push_str(mut b, "true")
+        } else {
+            strbuf.push_str(mut b, "false")
+        }
+    } else if kind >= 6 && kind <= 9 {
+        emit_json_string(mut b, node_str(arena, i))
+    }
+}
+
+/// Emit a table as JSON.
+fn emit_json_table(mut b: strbuf.StrBuf, arena: List[Node], i: int) -> () ! {
+    ParseError(int, int, str),
+} {
+    strbuf.push_str(mut b, "{{")
+    let keys = node_keys(arena, i)
+    let kids = node_kids(arena, i)
+    var first = true
+    var j = 0
+    while j < keys.len {
+        if !first {
+            strbuf.push_str(mut b, ",")
+        }
+        first = false
+        emit_json_string(mut b, keys[j])
+        strbuf.push_str(mut b, ":")
+        emit_json_node(mut b, arena, kids[j])?
+        j = j + 1
+    }
+    strbuf.push_str(mut b, "}}")
+}
+
+/// Emit an array as JSON.
+fn emit_json_array(mut b: strbuf.StrBuf, arena: List[Node], i: int) -> () ! {
+    ParseError(int, int, str),
+} {
+    strbuf.push_str(mut b, "[")
+    let kids = node_kids(arena, i)
+    var first = true
+    var j = 0
+    while j < kids.len {
+        if !first {
+            strbuf.push_str(mut b, ",")
+        }
+        first = false
+        emit_json_node(mut b, arena, kids[j])?
+        j = j + 1
+    }
+    strbuf.push_str(mut b, "]")
+}
+
+/// Emit a string as JSON.
+fn emit_json_string(mut b: strbuf.StrBuf, s: str) {
+    strbuf.push_str(mut b, "\"")
+    var i = 0
+    while i < s.len {
+        let ch = s.get(i..i + 1) else ""
+        if ch == "\"" {
+            strbuf.push_str(mut b, "\\\"")
+        } else if ch == "\\" {
+            strbuf.push_str(mut b, "\\\\")
+        } else if ch == "\n" {
+            strbuf.push_str(mut b, "\\n")
+        } else if ch == "\r" {
+            strbuf.push_str(mut b, "\\r")
+        } else if ch == "\t" {
+            strbuf.push_str(mut b, "\\t")
+        } else {
+            strbuf.push_str(mut b, ch)
+        }
+        i = i + 1
+    }
+    strbuf.push_str(mut b, "\"")
+}
+
+/// Emit a float as JSON.
+fn emit_json_float(mut b: strbuf.StrBuf, f: f64) {
+    strbuf.push_str(mut b, "{f}")
+}
+
+/// Emit a node as tagged JSON (corpus style).
+fn emit_tagged(arena: List[Node], i: int) -> str ! {ParseError(int, int, str)} {
+    var b = strbuf.new()
+    emit_tagged_node(mut b, arena, i)?
+    strbuf.to_str(b)
+}
+
+/// Emit a node as tagged JSON into a strbuf.
+fn emit_tagged_node(mut b: strbuf.StrBuf, arena: List[Node], i: int) -> () ! {
+    ParseError(int, int, str),
+} {
+    let kind = node_kind(arena, i)
+    if kind == 0 {
+        emit_tagged_table(mut b, arena, i)?
+    } else if kind == 1 {
+        emit_tagged_array(mut b, arena, i)?
+    } else if kind == 2 {
+        emit_tagged_value(mut b, "string", node_str(arena, i))
+    } else if kind == 3 {
+        emit_tagged_value(mut b, "integer", "{node_int(arena, i)}")
+    } else if kind == 4 {
+        emit_tagged_value(mut b, "float", node_str(arena, i))
+    } else if kind == 5 {
+        if node_bool(arena, i) {
+            emit_tagged_value(mut b, "bool", "true")
+        } else {
+            emit_tagged_value(mut b, "bool", "false")
+        }
+    } else if kind == 6 {
+        emit_tagged_value(mut b, "datetime", node_str(arena, i))
+    } else if kind == 7 {
+        emit_tagged_value(mut b, "datetime-local", node_str(arena, i))
+    } else if kind == 8 {
+        emit_tagged_value(mut b, "date-local", node_str(arena, i))
+    } else if kind == 9 {
+        emit_tagged_value(mut b, "time-local", node_str(arena, i))
+    }
+}
+
+/// Emit a tagged value: {"type": T, "value": V}
+fn emit_tagged_value(mut b: strbuf.StrBuf, t: str, v: str) {
+    strbuf.push_str(mut b, "{{\"type\":")
+    emit_json_string(mut b, t)
+    strbuf.push_str(mut b, ",\"value\":")
+    emit_json_string(mut b, v)
+    strbuf.push_str(mut b, "}}")
+}
+
+/// Emit a table as tagged JSON.
+fn emit_tagged_table(mut b: strbuf.StrBuf, arena: List[Node], i: int) -> () ! {
+    ParseError(int, int, str),
+} {
+    strbuf.push_str(mut b, "{{")
+    let keys = node_keys(arena, i)
+    let kids = node_kids(arena, i)
+    var first = true
+    var j = 0
+    while j < keys.len {
+        if !first {
+            strbuf.push_str(mut b, ",")
+        }
+        first = false
+        emit_json_string(mut b, keys[j])
+        strbuf.push_str(mut b, ":")
+        emit_tagged_node(mut b, arena, kids[j])?
+        j = j + 1
+    }
+    strbuf.push_str(mut b, "}}")
+}
+
+/// Emit an array as tagged JSON.
+fn emit_tagged_array(mut b: strbuf.StrBuf, arena: List[Node], i: int) -> () ! {
+    ParseError(int, int, str),
+} {
+    strbuf.push_str(mut b, "[")
+    let kids = node_kids(arena, i)
+    var first = true
+    var j = 0
+    while j < kids.len {
+        if !first {
+            strbuf.push_str(mut b, ",")
+        }
+        first = false
+        emit_tagged_node(mut b, arena, kids[j])?
+        j = j + 1
+    }
+    strbuf.push_str(mut b, "]")
+}
+
+fn emit_main() -> !int ! {ParseError(int, int, str)} {
+    var arena = List[Node]()
+    let root = table_node(mut arena, 0)
+    let s = string_node(mut arena, "hello")
+    add_key(mut arena, root, "key", s)
+    let j = emit_json(arena, root)?
+    print("json: {j}")
+    0
+}

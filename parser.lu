@@ -1,0 +1,486 @@
+//! check: run(exit=0)
+
+/// A TOML document parser that builds an arena tree.
+struct Parser {
+    c: Cursor,
+    arena: List[Node],
+    current: int,
+    tables: Map[str, int],
+    arrays: Map[str, int],
+}
+
+/// Create a new parser.
+fn parser_init(text: str) -> Parser {
+    let c = cursor_init(text)
+    var arena = List[Node]()
+    let root = table_node(mut arena, 0)
+    var tables = Map[str, int]()
+    var arrays = Map[str, int]()
+    Parser {
+        c: c,
+        arena: arena,
+        current: root,
+        tables: tables,
+        arrays: arrays,
+    }
+}
+
+/// Parse a TOML document. Returns the root node index.
+fn parse_document(mut p: Parser) -> int ! {ParseError(int, int, str)} {
+    while !cursor_at_end(p.c) {
+        cursor_skip_ws_comment(mut p.c)
+        if cursor_at_end(p.c) {
+            break
+        }
+        let ch = cursor_peek(p.c)
+        if ch == "[" {
+            let header = parse_header(mut p)?
+            if header.kind == 1 {
+                p.current = header.node
+            } else if header.kind == 2 {
+                p.current = header.node
+            }
+        } else {
+            let _ = parse_key_value(mut p)?
+        }
+    }
+    0
+}
+
+/// Parse a table or array of tables header.
+struct Header {
+    kind: int,
+    node: int,
+}
+
+fn parse_header(mut p: Parser) -> Header ! {ParseError(int, int, str)} {
+    let ch = cursor_peek(p.c)
+    if ch != "[" {
+        return ParseError(p.c.line, p.c.col, "expected [")
+    }
+    cursor_advance(mut p.c)
+    let ch2 = cursor_peek(p.c)
+    if ch2 == "[" {
+        cursor_advance(mut p.c)
+        let key = parse_key(mut p)?
+        cursor_skip_ws_comment(mut p.c)
+        let ch3 = cursor_peek(p.c)
+        if ch3 != "]" {
+            return ParseError(p.c.line, p.c.col, "expected ]")
+        }
+        cursor_advance(mut p.c)
+        let ch4 = cursor_peek(p.c)
+        if ch4 != "]" {
+            return ParseError(p.c.line, p.c.col, "expected ]")
+        }
+        cursor_advance(mut p.c)
+        // Table header must be followed by newline or EOF
+        require_newline_or_eof(mut p)?
+        // Create intermediate tables for dotted keys, last segment is an array
+        let arr_node = or_create_array_for_path(mut p, key)?
+        let new_table = table_node(mut p.arena, 3)
+        add_child(mut p.arena, arr_node, new_table)
+        return Header { kind: 2, node: new_table }
+    } else {
+        let key = parse_key(mut p)?
+        cursor_skip_ws_comment(mut p.c)
+        let ch3 = cursor_peek(p.c)
+        if ch3 != "]" {
+            return ParseError(p.c.line, p.c.col, "expected ]")
+        }
+        cursor_advance(mut p.c)
+        // Table header must be followed by newline or EOF
+        require_newline_or_eof(mut p)?
+        // Create intermediate tables for dotted keys
+        let table_node = or_create_table_for_path(mut p, key)?
+        return Header { kind: 1, node: table_node }
+    }
+}
+
+/// Require that the current position is at a newline, comment, or EOF.
+fn require_newline_or_eof(mut p: Parser) -> () ! {ParseError(int, int, str)} {
+    if cursor_at_end(p.c) {
+        return
+    }
+    let ch = cursor_peek(p.c)
+    if ch == "\n" || ch == "\r" {
+        return
+    }
+    // Check for # comment (which extends to end of line)
+    if ch == "#" {
+        return
+    }
+    // Check for whitespace followed by newline/comment/EOF
+    if ch == " " || ch == "\t" {
+        cursor_skip_ws(mut p.c)
+        if cursor_at_end(p.c) {
+            return
+        }
+        let ch2 = cursor_peek(p.c)
+        if ch2 == "\n" || ch2 == "\r" || ch2 == "#" {
+            return
+        }
+    }
+    return ParseError(p.c.line, p.c.col, "table header not followed by newline")
+}
+
+/// Create tables for each segment of a dotted path, returning the final table.
+fn or_create_table_for_path(mut p: Parser, key: str) -> int ! {ParseError(int, int, str)} {
+    var current = 0 // root table
+    var start = 0
+    var i = 0
+    while i < key.len {
+        let ch = key.get(i..i + 1) else ""
+        if ch == "." {
+            let segment = key.get(start..i) else ""
+            let child = or_create_table_in(mut p, current, segment)?
+            current = child
+            start = i + 1
+        }
+        i = i + 1
+    }
+    // Last segment
+    let segment = key.get(start..) else ""
+    let child = or_create_table_in(mut p, current, segment)?
+    child
+}
+
+/// Get or create a table child of parent with the given key. Returns error if key exists with wrong type.
+fn or_create_table_in(mut p: Parser, parent: int, key: str) -> int ! {ParseError(int, int, str)} {
+    let keys = node_keys(p.arena, parent)
+    let kids = node_kids(p.arena, parent)
+    var i = 0
+    while i < keys.len {
+        if keys[i] == key {
+            let kid = kids[i]
+            let kind = node_kind(p.arena, kid)
+            if kind == 0 {
+                return kid
+            }
+            // Key exists but is not a table
+            return ParseError(p.c.line, p.c.col, "key already defined")
+        }
+        i = i + 1
+    }
+    let new_table = table_node(mut p.arena, 1)
+    add_key(mut p.arena, parent, key, new_table)
+    new_table
+}
+
+/// Get or create an array child of parent with the given key. Returns error if key exists.
+/// For [[key]] headers, the key must not already exist (even as an array).
+fn or_create_array_in(mut p: Parser, parent: int, key: str) -> int ! {ParseError(int, int, str)} {
+    let keys = node_keys(p.arena, parent)
+    let kids = node_kids(p.arena, parent)
+    var i = 0
+    while i < keys.len {
+        if keys[i] == key {
+            // Key already exists - [[key]] cannot extend an existing array
+            return ParseError(p.c.line, p.c.col, "key already defined")
+        }
+        i = i + 1
+    }
+    let new_array = array_node(mut p.arena)
+    add_key(mut p.arena, parent, key, new_array)
+    new_array
+}
+
+/// Create tables for each segment of a dotted path except the last, which is an array.
+fn or_create_array_for_path(mut p: Parser, key: str) -> int ! {ParseError(int, int, str)} {
+    let last_dot = key.rfind(".") else -1
+    if last_dot < 0 {
+        // No dot, create array directly in root
+        return or_create_array_in(mut p, 0, key)?
+    }
+    // Create intermediate tables for all segments except the last
+    let prefix = key.get(0..last_dot) else ""
+    let parent = or_create_table_for_path(mut p, prefix)?
+    // Last segment is the array key
+    let arr_key = key.get(last_dot + 1..) else ""
+    or_create_array_in(mut p, parent, arr_key)?
+}
+
+/// Parse a key (bare or quoted, possibly dotted).
+fn parse_key(mut p: Parser) -> str ! {ParseError(int, int, str)} {
+    cursor_skip_ws_comment(mut p.c)
+    let ch = cursor_peek(p.c)
+    if ch == "\"" {
+        let s = parse_string(mut p.c)?
+        cursor_skip_ws_comment(mut p.c)
+        let ch2 = cursor_peek(p.c)
+        if ch2 == "." {
+            cursor_advance(mut p.c)
+            let rest = parse_key(mut p)?
+            return s + "." + rest
+        }
+        return s
+    }
+    if ch == "'" {
+        let s = parse_string(mut p.c)?
+        cursor_skip_ws_comment(mut p.c)
+        let ch2 = cursor_peek(p.c)
+        if ch2 == "." {
+            cursor_advance(mut p.c)
+            let rest = parse_key(mut p)?
+            return s + "." + rest
+        }
+        return s
+    }
+    var result = ""
+    while !cursor_at_end(p.c) {
+        let ch = cursor_peek(p.c)
+        if ch >= "a" && ch <= "z" ||
+            ch >= "A" && ch <= "Z" ||
+            ch >= "0" && ch <= "9" ||
+            ch == "-" ||
+            ch == "_" {
+            result = result + ch
+            cursor_advance(mut p.c)
+        } else {
+            break
+        }
+    }
+    if result == "" {
+        return ParseError(p.c.line, p.c.col, "empty key")
+    }
+    cursor_skip_ws_comment(mut p.c)
+    let ch2 = cursor_peek(p.c)
+    if ch2 == "." {
+        cursor_advance(mut p.c)
+        let rest = parse_key(mut p)?
+        return result + "." + rest
+    }
+    return result
+}
+
+/// Parse a key = value pair.
+fn parse_key_value(mut p: Parser) -> int ! {ParseError(int, int, str)} {
+    let key = parse_key(mut p)?
+    cursor_skip_ws_comment(mut p.c)
+    let ch = cursor_peek(p.c)
+    if ch != "=" {
+        return ParseError(p.c.line, p.c.col, "expected =")
+    }
+    cursor_advance(mut p.c)
+    cursor_skip_ws_comment(mut p.c)
+    let value_node = parse_value(mut p)?
+    // Check if key is already defined, and if dotted key's intermediates are valid
+    add_key_checked(mut p, p.current, key, value_node)?
+    value_node
+}
+
+/// Add a key to a table, checking for duplicates and valid intermediates.
+fn add_key_checked(mut p: Parser, parent: int, key: str, value_node: int) -> () ! {
+    ParseError(int, int, str),
+} {
+    let keys = node_keys(p.arena, parent)
+    var i = 0
+    while i < keys.len {
+        if keys[i] == key {
+            return ParseError(p.c.line, p.c.col, "key already defined")
+        }
+        i = i + 1
+    }
+    // For dotted keys, check that intermediates are tables
+    let dot = key.find(".") else -1
+    if dot >= 0 {
+        let first = key.get(0..dot) else ""
+        let kid_idx = find_child(p.arena, parent, first) else -1
+        if kid_idx >= 0 {
+            let kind = node_kind(p.arena, kid_idx)
+            if kind != 0 {
+                return ParseError(p.c.line, p.c.col, "key already defined")
+            }
+            // Recurse into the child table
+            let rest = key.get(dot + 1..) else ""
+            add_key_checked(mut p, kid_idx, rest, value_node)?
+            return
+        }
+    }
+    add_key(mut p.arena, parent, key, value_node)
+}
+
+/// Find the index of a child node by key.
+fn find_child(arena: List[Node], parent: int, key: str) -> int ! {ParseError(int, int, str)} {
+    let keys = node_keys(arena, parent)
+    let kids = node_kids(arena, parent)
+    var i = 0
+    while i < keys.len {
+        if keys[i] == key {
+            return kids[i]
+        }
+        i = i + 1
+    }
+    return -1
+}
+
+/// Parse a value.
+fn parse_value(mut p: Parser) -> int ! {ParseError(int, int, str)} {
+    let kind = peek_value_kind(p.c)
+    if kind == "string" {
+        let s = parse_string(mut p.c)?
+        return string_node(mut p.arena, s)
+    }
+    if kind == "integer" {
+        let v = parse_integer(mut p.c)?
+        let i = v.to_int() else 0
+        return int_node(mut p.arena, i)
+    }
+    if kind == "float" {
+        let v = parse_float(mut p.c)?
+        let n = Node {
+            kind: 4,
+            b: false,
+            i: 0,
+            f: 0.0,
+            s: v,
+            kids: List[int](),
+            keys: List[str](),
+            defined_by: 0,
+        }
+        (mut p.arena).push(n)
+        return p.arena.len - 1
+    }
+    if kind == "bool" {
+        let v = parse_boolean(mut p.c)?
+        let b = v == "true"
+        return bool_node(mut p.arena, b)
+    }
+    if kind == "datetime" {
+        let v = parse_datetime(mut p.c)?
+        return datetime_node(mut p.arena, v, 6)
+    }
+    if kind == "local-date" {
+        let v = parse_local_date(mut p.c)?
+        return datetime_node(mut p.arena, v, 8)
+    }
+    if kind == "local-time" {
+        let v = parse_local_time(mut p.c)?
+        return datetime_node(mut p.arena, v, 9)
+    }
+    let ch = cursor_peek(p.c)
+    if ch == "[" {
+        return parse_array(mut p)?
+    }
+    if ch == "{{" {
+        return parse_inline_table(mut p)?
+    }
+    return ParseError(p.c.line, p.c.col, "unexpected value")
+}
+
+/// Parse an array.
+fn parse_array(mut p: Parser) -> int ! {ParseError(int, int, str)} {
+    let ch = cursor_peek(p.c)
+    if ch != "[" {
+        return ParseError(p.c.line, p.c.col, "expected [")
+    }
+    cursor_advance(mut p.c)
+    let arr_node = array_node(mut p.arena)
+    cursor_skip_ws_comment(mut p.c)
+    let ch2 = cursor_peek(p.c)
+    if ch2 == "]" {
+        cursor_advance(mut p.c)
+        return arr_node
+    }
+    while !cursor_at_end(p.c) {
+        let value_node = parse_value(mut p)?
+        add_child(mut p.arena, arr_node, value_node)
+        cursor_skip_ws_comment(mut p.c)
+        let ch3 = cursor_peek(p.c)
+        if ch3 == "]" {
+            cursor_advance(mut p.c)
+            return arr_node
+        }
+        if ch3 == "," {
+            cursor_advance(mut p.c)
+            cursor_skip_ws_comment(mut p.c)
+            let ch4 = cursor_peek(p.c)
+            if ch4 == "]" {
+                cursor_advance(mut p.c)
+                return arr_node
+            }
+        } else {
+            return ParseError(p.c.line, p.c.col, "expected , or ]")
+        }
+    }
+    return ParseError(p.c.line, p.c.col, "unexpected end of array")
+}
+
+/// Parse an inline table.
+fn parse_inline_table(mut p: Parser) -> int ! {ParseError(int, int, str)} {
+    let ch = cursor_peek(p.c)
+    if ch != "{{" {
+        return ParseError(p.c.line, p.c.col, "expected {{")
+    }
+    cursor_advance(mut p.c)
+    let table_node = table_node(mut p.arena, 2)
+    cursor_skip_ws_comment(mut p.c)
+    let ch2 = cursor_peek(p.c)
+    if ch2 == "}}" {
+        cursor_advance(mut p.c)
+        return table_node
+    }
+    while !cursor_at_end(p.c) {
+        let key = parse_key(mut p)?
+        cursor_skip_ws_comment(mut p.c)
+        let ch3 = cursor_peek(p.c)
+        if ch3 != "=" {
+            return ParseError(p.c.line, p.c.col, "expected =")
+        }
+        cursor_advance(mut p.c)
+        cursor_skip_ws_comment(mut p.c)
+        let value_node = parse_value(mut p)?
+        add_key(mut p.arena, table_node, key, value_node)
+        cursor_skip_ws_comment(mut p.c)
+        let ch4 = cursor_peek(p.c)
+        if ch4 == "}}" {
+            cursor_advance(mut p.c)
+            return table_node
+        }
+        if ch4 == "," {
+            cursor_advance(mut p.c)
+            cursor_skip_ws_comment(mut p.c)
+            let ch5 = cursor_peek(p.c)
+            if ch5 == "}}" {
+                cursor_advance(mut p.c)
+                return table_node
+            }
+        } else {
+            return ParseError(p.c.line, p.c.col, "expected , or }}")
+        }
+    }
+    return ParseError(p.c.line, p.c.col, "unexpected end of inline table")
+}
+
+/// Get or create a table for a key.
+fn or_create_table(mut p: Parser, key: str) -> int {
+    let existing = p.tables.get(key) else -1
+    if existing >= 0 {
+        return existing
+    }
+    let new_table = table_node(mut p.arena, 1)
+    (mut p.tables).set(key, new_table)
+    new_table
+}
+
+/// Get or create an array for a key.
+fn or_create_array(mut p: Parser, key: str) -> int {
+    let existing = p.arrays.get(key) else -1
+    if existing >= 0 {
+        return existing
+    }
+    let new_array = array_node(mut p.arena)
+    (mut p.arrays).set(key, new_array)
+    new_array
+}
+
+fn parser_main() -> !int {
+    let text = "a = 1\n[b]\nc = 2"
+    var p = parser_init(text)
+    let root = parse_document(mut p) else |err| {
+        print("error: {err}")
+        return 1
+    }
+    print("root kind: {node_kind(p.arena, root)}")
+    0
+}
