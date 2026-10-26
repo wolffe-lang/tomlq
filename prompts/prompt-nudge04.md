@@ -49,7 +49,7 @@ it is a known limit, not this closeout's job. `prompts/close03-memory.md` carrie
 
 **Verify (paste), then stop:**
 - `./test.sh > .t.log 2>&1; echo "exit=$?"; grep -E '^(ok|FAIL) +(P1|P2|U1|J1|S1v|S1i|C[1-7])' .t.log; rm -f .t.log`
-  Expected: **P1 ok** (the judge measured 0.44 s, about 630 MB on 9.3 MB) and **P2 ok** (about 0.34 s, 60 MB). The C rows and S1
+  Expected: **P1 ok** (the judge applied exactly these edits to a clone of `68336eb`: 0.45 s, 648 MB) and **P2 ok** (0.22 s, 145 MB). The C rows and S1
   are what later closeouts fix — leave them.
 - Commit: `git add sink.lu emit.lu && git commit -m "Build JSON output in a byte list, not std.strbuf"`; paste `git log --oneline | head -4`
   and `git status --short`.
