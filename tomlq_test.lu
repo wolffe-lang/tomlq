@@ -87,3 +87,39 @@ fn test_line_ending_backslash_trims_whitespace() -> !int {
     bad = bad + expect("the first newline", json_of("a = \"\"\"\nx\"\"\""), "{{\"a\":\"x\"}}")
     bad
 }
+
+fn test_dotted_keys_create_tables() -> !int {
+    var bad = 0
+    // a.b.c = 1 makes tables a and a.b
+    bad = bad +
+        expect("three segments", json_of("a.b.c = 1"), "{{{{\"a\":{{{{\"b\":{{{{\"c\":1}}}}}}}}}}")
+    // a.b = 1 then a.c = 2 share table a
+    bad = bad +
+        expect(
+            "shared parent",
+            json_of("a.b = 1\na.c = 2"),
+            "{{{{\"a\":{{{{\"b\":1,\"c\":2}}}}}}}}",
+        )
+    // "a.b" = 1 is one key (quoted segment)
+    bad = bad + expect("quoted dot", json_of("\"a.b\" = 1"), "{{{{\"a.b\":1}}}}")
+    // a . b = 1 (spaces around the dot) equals a.b = 1
+    bad = bad + expect("spaces around dot", json_of("a . b = 1"), "{{{{\"a\":{{{{\"b\":1}}}}}}}}")
+    // [x."y.z"] opens table y.z inside x
+    bad = bad +
+        expect(
+            "table header quoted",
+            json_of("[x.\"y.z\"]\nk = 1"),
+            "{{{{\"x\":{{{{\"y.z\":{{{{\"k\":1}}}}}}}}}}",
+        )
+    // a.b = 1 then a.b = 2 is refused
+    if !json_of("a.b = 1\na.b = 2").starts_with("ERR") {
+        print("duplicate dotted key was accepted")
+        bad = bad + 1
+    }
+    // a = 1 then a.b = 2 is refused
+    if !json_of("a = 1\na.b = 2").starts_with("ERR") {
+        print("scalar then dotted key was accepted")
+        bad = bad + 1
+    }
+    bad
+}

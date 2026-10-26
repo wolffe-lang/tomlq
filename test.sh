@@ -20,6 +20,8 @@ step "build wolf build main.lu -o tomlq" wolf build main.lu -o tomlq
 [ -x ./tomlq ] || { echo "no binary; stopping"; exit 1; }
 step "unit  wolf test ." wolf test .
 row C1 0 '{"a":{"b":1},"c":{"d":"x"}}' '' "printf 'a.b = 1\n[c]\nd = \"x\"\n' | ./tomlq --json -"
+row K1 0 '{"k":{"a.b":1},"x.y":2}' '' "printf 'k.\"a.b\" = 1\n\"x.y\" = 2\n' | ./tomlq --json -"
+row K2 0 '1' '' "printf 'a.\"b c\".d = 1\n' | ./tomlq '.a.\"b c\".d' -"
 printf 'a.b = 1\n[c]\nd = "x"\n' > .c2.toml
 row C2a 0 'x' '' "./tomlq .c.d .c2.toml"
 row C2b 0 '1' '' "./tomlq .a.b .c2.toml"
