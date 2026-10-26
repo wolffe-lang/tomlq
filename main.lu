@@ -199,16 +199,33 @@ fn navigate_path(arena: List[Node], root: int, path: str) -> int {
             }
             continue
         }
-        // Find next "." or "["
+        // Find next "." or "[", handling quoted keys
         var next = pos
-        while next < path.len {
-            let ch = path.get(next..next + 1) else ""
-            if ch == "." || ch == "[" {
-                break
+        if (path.get(pos..pos + 1) else "") == "\"" {
+            // Quoted key: find the closing quote
+            next = pos + 1
+            while next < path.len {
+                let ch = path.get(next..next + 1) else ""
+                if ch == "\"" {
+                    break
+                }
+                next = next + 1
             }
-            next = next + 1
+            next = next + 1 // skip closing quote
+        } else {
+            while next < path.len {
+                let ch = path.get(next..next + 1) else ""
+                if ch == "." || ch == "[" {
+                    break
+                }
+                next = next + 1
+            }
         }
-        let key = path.get(pos..next) else ""
+        var key = path.get(pos..next) else ""
+        // Strip quotes from the key
+        if key.starts_with("\"") && key.ends_with("\"") {
+            key = key.get(1..key.len - 1) else key
+        }
         pos = next
         // Skip "."
         if pos < path.len && (path.get(pos..pos + 1) else "") == "." {
