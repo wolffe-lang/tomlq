@@ -22,3 +22,68 @@ fn test_main() -> !int {
     print("json: {j}")
     0
 }
+
+/// The plain JSON of a small document, or "ERR: ..." when it is refused.
+fn json_of(text: str) -> str {
+    var p = parser_init(text)
+    let root = parse_document(mut p) else |e| {
+        return "ERR: {e}"
+    }
+    emit_json(p.arena, root) else |e| {
+        "ERR: {e}"
+    }
+}
+
+/// 0 when `got` is `want`; otherwise prints both and returns 1.
+fn expect(name: str, got: str, want: str) -> int {
+    if got == want {
+        return 0
+    }
+    print("{name}: got [{got}] want [{want}]")
+    1
+}
+
+fn test_strings_decode_as_utf8() -> !int {
+    var bad = 0
+    bad = bad + expect("escaped e-acute", json_of("a = \"\\u00e9\""), "{{\"a\":\"é\"}}")
+    bad = bad + expect("escaped emoji", json_of("a = \"\\U0001F600\""), "{{\"a\":\"😀\"}}")
+    bad = bad + expect("literal multibyte", json_of("a = \"ɑ€𐫱\""), "{{\"a\":\"ɑ€𐫱\"}}")
+    bad = bad + expect("literal string", json_of("a = 'é'"), "{{\"a\":\"é\"}}")
+    bad = bad + expect("unicode keys", json_of("\"μ\" = 1\n\"Μ\" = 2"), "{{\"μ\":1,\"Μ\":2}}")
+    bad
+}
+
+fn test_bad_code_points_are_refused() -> !int {
+    var bad = 0
+    if !json_of("a = \"\\uD800\"").starts_with("ERR") {
+        print("a surrogate was accepted")
+        bad = bad + 1
+    }
+    if !json_of("a = \"\\U00110000\"").starts_with("ERR") {
+        print("a code point past 10FFFF was accepted")
+        bad = bad + 1
+    }
+    bad
+}
+
+fn test_json_escapes_control_characters() -> !int {
+    expect(
+        "controls",
+        json_of("a = \"\\b\\f\\u0001\\u001F\\u007F\""),
+        "{{\"a\":\"\\b\\f\\u0001\\u001f\\u007f\"}}",
+    )
+}
+
+fn test_line_ending_backslash_trims_whitespace() -> !int {
+    var bad = 0
+    bad = bad +
+        expect("to the next character", json_of("a = \"\"\"\\\n    x\"\"\""), "{{\"a\":\"x\"}}")
+    bad = bad +
+        expect(
+            "spaces after the backslash",
+            json_of("a = \"\"\"a\\  \n\n  b\"\"\""),
+            "{{\"a\":\"ab\"}}",
+        )
+    bad = bad + expect("the first newline", json_of("a = \"\"\"\nx\"\"\""), "{{\"a\":\"x\"}}")
+    bad
+}
