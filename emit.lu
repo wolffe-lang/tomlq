@@ -72,7 +72,12 @@ fn emit_json_string(mut b: Sink, s: str) {
     sink_push(mut b, "\"")
     var i = 0
     while i < s.len {
-        let ch = s.get(i..i + 1) else ""
+        let ch = char_at(s, i)
+        if ch == "" {
+            i = i + 1
+        } else {
+            i = i + ch.len
+        }
         if ch == "\"" {
             sink_push(mut b, "\\\"")
         } else if ch == "\\" {
@@ -83,12 +88,26 @@ fn emit_json_string(mut b: Sink, s: str) {
             sink_push(mut b, "\\r")
         } else if ch == "\t" {
             sink_push(mut b, "\\t")
+        } else if ch == "\x08" {
+            sink_push(mut b, "\\b")
+        } else if ch == "\x0C" {
+            sink_push(mut b, "\\f")
+        } else if ch.len == 1 && (ch < " " || ch == "\x7F") {
+            sink_push(mut b, json_control(ch))
         } else {
             sink_push(mut b, ch)
         }
-        i = i + 1
     }
     sink_push(mut b, "\"")
+}
+
+/// `\u00XX` for a control character (one byte below 0x20, or 0x7F).
+fn json_control(ch: str) -> str {
+    let v = ch.bytes()[0] as int
+    let hex = "0123456789abcdef"
+    let hi = hex.get(v / 16..v / 16 + 1) else "0"
+    let lo = hex.get(v % 16..v % 16 + 1) else "0"
+    "\\u00" + hi + lo
 }
 
 /// Emit a float as JSON.
