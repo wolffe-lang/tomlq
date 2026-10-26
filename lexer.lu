@@ -543,146 +543,98 @@ fn tokenize_string(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
 }
 
 /// Parse an integer. Returns the raw text of the integer.
-fn parse_integer(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
-    var result = ""
+fn parse_integer(mut c: Cursor) -> i64 ! {ParseError(int, int, str)} {
     // Check for base prefix first (no sign allowed for non-decimal)
     let rest = c.s.get(c.pos..) else ""
-    if rest.starts_with("0b") || rest.starts_with("0B") {
-        // Binary
-        result = result + "0b"
+    if rest.starts_with("0b") {
+        // Binary — prefix must be lowercase
         cursor_advance(mut c)
         cursor_advance(mut c)
-        // Must have at least one digit
-        let ch = cursor_peek(c)
-        if ch != "0" && ch != "1" {
-            return ParseError(c.line, c.col, "invalid binary integer")
-        }
-        while !cursor_at_end(c) {
-            let ch = cursor_peek(c)
-            if ch == "0" || ch == "1" {
-                result = result + ch
-                cursor_advance(mut c)
-            } else if ch == "_" {
-                // Underscore separator
-                cursor_advance(mut c)
-                let next = cursor_peek(c)
-                if next == "0" || next == "1" {
-                    result = result + "_"
-                } else {
-                    return ParseError(
-                        c.line,
-                        c.col,
-                        "invalid character after underscore in integer",
-                    )
-                }
-            } else {
-                break
-            }
-        }
-        return result
+        let digits = parse_digit_run(mut c, 2)?
+        let clean = digits.replace("_", "")
+        let v = parse_int_base(clean, 2)?
+        return v
     }
-    if rest.starts_with("0o") || rest.starts_with("0O") {
+    if rest.starts_with("0B") {
+        return ParseError(c.line, c.col, "uppercase prefix in integer")
+    }
+    if rest.starts_with("0o") {
         // Octal
-        result = result + "0o"
         cursor_advance(mut c)
         cursor_advance(mut c)
-        // Must have at least one digit
-        let ch = cursor_peek(c)
-        if ch < "0" || ch > "7" {
-            return ParseError(c.line, c.col, "invalid octal integer")
-        }
-        while !cursor_at_end(c) {
-            let ch = cursor_peek(c)
-            if ch >= "0" && ch <= "7" {
-                result = result + ch
-                cursor_advance(mut c)
-            } else if ch == "_" {
-                cursor_advance(mut c)
-                let next = cursor_peek(c)
-                if next >= "0" && next <= "7" {
-                    result = result + "_"
-                } else {
-                    return ParseError(
-                        c.line,
-                        c.col,
-                        "invalid character after underscore in integer",
-                    )
-                }
-            } else {
-                break
-            }
-        }
-        return result
+        let digits = parse_digit_run(mut c, 8)?
+        let clean = digits.replace("_", "")
+        let v = parse_int_base(clean, 8)?
+        return v
     }
-    if rest.starts_with("0x") || rest.starts_with("0X") {
+    if rest.starts_with("0O") {
+        return ParseError(c.line, c.col, "uppercase prefix in integer")
+    }
+    if rest.starts_with("0x") {
         // Hexadecimal
-        result = result + "0x"
         cursor_advance(mut c)
         cursor_advance(mut c)
-        // Must have at least one digit
-        let ch = cursor_peek(c)
-        if !is_hex_char(ch) {
-            return ParseError(c.line, c.col, "invalid hexadecimal integer")
-        }
-        while !cursor_at_end(c) {
-            let ch = cursor_peek(c)
-            if is_hex_char(ch) {
-                result = result + ch
-                cursor_advance(mut c)
-            } else if ch == "_" {
-                cursor_advance(mut c)
-                let next = cursor_peek(c)
-                if is_hex_char(next) {
-                    result = result + "_"
-                } else {
-                    return ParseError(
-                        c.line,
-                        c.col,
-                        "invalid character after underscore in integer",
-                    )
-                }
-            } else {
-                break
-            }
-        }
-        return result
+        let digits = parse_hex_run(mut c)?
+        let clean = digits.replace("_", "")
+        let v = parse_int_base(clean, 16)?
+        return v
+    }
+    if rest.starts_with("0X") {
+        return ParseError(c.line, c.col, "uppercase prefix in integer")
     }
     // Decimal: optional sign
-    let sign = cursor_peek(c)
-    if sign == "+" || sign == "-" {
-        result = result + sign
+    var sign: i64 = 1
+    let first = cursor_peek(c)
+    if first == "+" {
         cursor_advance(mut c)
-        // After sign, check if it's a non-decimal integer (invalid)
-        let rest2 = c.s.get(c.pos..) else ""
-        if rest2.starts_with("0b") ||
-            rest2.starts_with("0B") ||
-            rest2.starts_with("0o") ||
-            rest2.starts_with("0O") ||
-            rest2.starts_with("0x") ||
-            rest2.starts_with("0X") {
-            return ParseError(c.line, c.col, "sign not allowed on non-decimal integer")
-        }
+    } else if first == "-" {
+        sign = -1
+        cursor_advance(mut c)
     }
     // Check for leading zero (invalid unless it's just "0")
-    let first = cursor_peek(c)
-    if first == "0" {
+    let ch = cursor_peek(c)
+    if ch == "0" {
         let next = c.s.get(c.pos + 1..c.pos + 2) else ""
-        if next.starts_with("_") || next.len > 0 && next[0..1] >= "0" && next[0..1] <= "9" {
-            return ParseError(c.line, c.col, "leading zeros in integer")
+        if next.len > 0 {
+            let nch = next[0..1]
+            if nch >= "0" && nch <= "9" || nch == "_" {
+                return ParseError(c.line, c.col, "leading zeros in integer")
+            }
         }
     }
     // Parse digits
+    let digits = parse_digit_run(mut c, 10)?
+    let clean = digits.replace("_", "")
+    if clean == "" {
+        return ParseError(c.line, c.col, "empty integer")
+    }
+    // Check if it's the special case of -9223372036854775808
+    if sign == -1 && clean == "9223372036854775808" {
+        return -9223372036854775808
+    }
+    let v = parse_int_base(clean, 10)?
+    if sign == 1 {
+        return v
+    }
+    return sign * v
+}
+
+/// Parse a run of decimal digits (with underscores between digits).
+fn parse_digit_run(mut c: Cursor, base: int) -> str ! {ParseError(int, int, str)} {
+    var result = ""
+    var last_was_digit = false
     while !cursor_at_end(c) {
         let ch = cursor_peek(c)
-        if ch >= "0" && ch <= "9" {
+        if is_digit_for_base(ch, base) {
             result = result + ch
             cursor_advance(mut c)
-        } else if ch == "_" {
+            last_was_digit = true
+        } else if ch == "_" && last_was_digit {
             cursor_advance(mut c)
             let next = cursor_peek(c)
-            if next >= "0" && next <= "9" {
+            if is_digit_for_base(next, base) {
                 result = result + "_"
-                // Don't advance yet; the next iteration will consume the digit
+                last_was_digit = false
             } else {
                 return ParseError(c.line, c.col, "invalid character after underscore in integer")
             }
@@ -690,10 +642,96 @@ fn parse_integer(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
             break
         }
     }
-    if result == "" || result == "+" || result == "-" {
+    if result == "" || result.ends_with("_") {
         return ParseError(c.line, c.col, "empty integer")
     }
     result
+}
+
+/// Parse a run of hex digits (with underscores between digits).
+fn parse_hex_run(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
+    var result = ""
+    var last_was_digit = false
+    while !cursor_at_end(c) {
+        let ch = cursor_peek(c)
+        if is_hex_char(ch) {
+            result = result + ch
+            cursor_advance(mut c)
+            last_was_digit = true
+        } else if ch == "_" && last_was_digit {
+            cursor_advance(mut c)
+            let next = cursor_peek(c)
+            if is_hex_char(next) {
+                result = result + "_"
+                last_was_digit = false
+            } else {
+                return ParseError(c.line, c.col, "invalid character after underscore in integer")
+            }
+        } else {
+            break
+        }
+    }
+    if result == "" || result.ends_with("_") {
+        return ParseError(c.line, c.col, "empty integer")
+    }
+    result
+}
+
+/// Check if a character is a valid digit for the given base.
+fn is_digit_for_base(ch: str, base: int) -> bool {
+    if base == 2 {
+        return ch == "0" || ch == "1"
+    }
+    if base == 8 {
+        return ch >= "0" && ch <= "7"
+    }
+    return ch >= "0" && ch <= "9"
+}
+
+/// Parse a string as an integer in the given base. Returns error on overflow.
+fn parse_int_base(s: str, base: int) -> i64 ! {ParseError(int, int, str)} {
+    if base == 10 {
+        let v = s.to_int() else return ParseError(0, 0, "integer overflow")
+        return v as i64
+    }
+    var result: i64 = 0
+    var i = 0
+    while i < s.len {
+        let ch = s.get(i..i + 1) else ""
+        let digit = hex_value(ch)
+        if digit < 0 || digit >= base {
+            return ParseError(0, 0, "invalid digit for base {base}")
+        }
+        // Check for overflow: result * base + digit > max
+        // Equivalent to: result > (max - digit) / base
+        let max: i64 = 9223372036854775807
+        if result > (max - digit as i64) / base as i64 {
+            return ParseError(0, 0, "integer overflow")
+        }
+        result = result * base as i64 + digit as i64
+        i = i + 1
+    }
+    result
+}
+
+/// Return the numeric value of a hex digit, or -1 if not a hex digit.
+fn hex_value(ch: str) -> int {
+    if ch >= "0" && ch <= "9" {
+        return ch.to_int() else -1
+    }
+    if ch == "a" { return 10 }
+    if ch == "b" { return 11 }
+    if ch == "c" { return 12 }
+    if ch == "d" { return 13 }
+    if ch == "e" { return 14 }
+    if ch == "f" { return 15 }
+    if ch == "A" { return 10 }
+    if ch == "B" { return 11 }
+    if ch == "C" { return 12 }
+    if ch == "D" { return 13 }
+    if ch == "E" { return 14 }
+    if ch == "F" { return 15 }
+    -1
 }
 
 /// Check if a character is a hex digit.
@@ -711,12 +749,14 @@ fn is_hex_char(ch: str) -> bool {
 }
 
 /// Parse a float. Returns the raw text of the float.
-fn parse_float(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
-    var result = ""
+fn parse_float(mut c: Cursor) -> f64 ! {ParseError(int, int, str)} {
     // Optional sign
-    let sign = cursor_peek(c)
-    if sign == "+" || sign == "-" {
-        result = result + sign
+    var sign = 1.0
+    let first = cursor_peek(c)
+    if first == "+" {
+        cursor_advance(mut c)
+    } else if first == "-" {
+        sign = -1.0
         cursor_advance(mut c)
     }
     // Check for inf/nan
@@ -736,7 +776,7 @@ fn parse_float(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
         cursor_advance(mut c)
         cursor_advance(mut c)
         cursor_advance(mut c)
-        return "inf"
+        return sign * 1.0 / 0.0 // inf or -inf
     }
     if rest.starts_with("nan") {
         // Must be exactly "nan" (not followed by a letter, digit, or _)
@@ -753,19 +793,147 @@ fn parse_float(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
         cursor_advance(mut c)
         cursor_advance(mut c)
         cursor_advance(mut c)
-        return "nan"
+        return 0.0 / 0.0 // nan
     }
-    // Parse digits before decimal point
+    // Parse digits before decimal point — must have at least one
+    let before = parse_float_digits(mut c)?
+    if before == "" {
+        return ParseError(c.line, c.col, "no digits before decimal point in float")
+    }
+    // Check for leading zero
+    if before.starts_with("0") && before.len > 1 {
+        let next = before.get(1..2) else ""
+        if next.len > 0 && next[0..1] >= "0" && next[0..1] <= "9" {
+            return ParseError(c.line, c.col, "leading zeros in float")
+        }
+    }
+    // Check for decimal point
+    var after_dot = ""
+    let dot = cursor_peek(c)
+    if dot == "." {
+        cursor_advance(mut c)
+        // Must have at least one digit after decimal point
+        after_dot = parse_float_digits(mut c)?
+        if after_dot == "" {
+            return ParseError(c.line, c.col, "no digits after decimal point in float")
+        }
+    }
+    // Check for exponent
+    var exp_digits = ""
+    let exp = cursor_peek(c)
+    if exp == "e" || exp == "E" {
+        cursor_advance(mut c)
+        // Optional sign
+        let sign2 = cursor_peek(c)
+        if sign2 == "+" || sign2 == "-" {
+            cursor_advance(mut c)
+        }
+        // Must have at least one digit
+        exp_digits = parse_float_digits(mut c)?
+        if exp_digits == "" {
+            return ParseError(c.line, c.col, "no digits in exponent of float")
+        }
+    }
+    // Build the clean string and parse
+    var clean = before.replace("_", "")
+    if after_dot != "" {
+        clean = clean + "." + after_dot.replace("_", "")
+    }
+    if exp_digits != "" {
+        clean = clean + "e" + exp_digits.replace("_", "")
+    }
+    // Parse the float
+    let v = parse_float_str(clean) else 0.0
+    return sign * v
+}
+
+/// 10^n as an int.
+fn pow10(n: int) -> int {
+    var result = 1
+    var i = 0
+    while i < n {
+        result = result * 10
+        i = i + 1
+    }
+    result
+}
+
+/// Parse a string as an f64. Returns 0.0 on error.
+fn parse_float_str(s: str) -> f64 ! {ParseError(int, int, str)} {
+    // Handle inf/nan
+    if s == "inf" {
+        return 1.0 / 0.0
+    }
+    if s == "-inf" {
+        return -1.0 / 0.0
+    }
+    if s == "nan" {
+        return 0.0 / 0.0
+    }
+    // Parse the integer part
+    var dot_pos = s.find(".") else -1
+    var exp_pos = s.find("e") else -1
+    if exp_pos < 0 {
+        exp_pos = s.find("E") else -1
+    }
+    var int_part = 0
+    var frac_part = 0
+    var frac_scale = 1
+    var exp = 0
+    if dot_pos >= 0 {
+        let int_str = s.get(0..dot_pos) else ""
+        int_part = int_str.to_int() else 0
+        let frac_str = s.get(dot_pos + 1..) else ""
+        if exp_pos >= 0 {
+            let exp_in_frac = exp_pos - dot_pos - 1
+            let frac_before_exp = frac_str.get(0..exp_in_frac) else ""
+            frac_part = frac_before_exp.to_int() else 0
+            frac_scale = pow10(frac_before_exp.len)
+            let exp_str = frac_str.get(exp_in_frac + 1..) else ""
+            exp = exp_str.to_int() else 0
+        } else {
+            frac_part = frac_str.to_int() else 0
+            frac_scale = pow10(frac_str.len)
+        }
+    } else if exp_pos >= 0 {
+        let int_str = s.get(0..exp_pos) else ""
+        int_part = int_str.to_int() else 0
+        let exp_str = s.get(exp_pos + 1..) else ""
+        exp = exp_str.to_int() else 0
+    } else {
+        int_part = s.to_int() else 0
+    }
+    // Combine
+    var result = int_part as f64 + frac_part as f64 / frac_scale as f64
+    // Apply exponent
+    var i = 0
+    while i < exp {
+        result = result * 10.0
+        i = i + 1
+    }
+    while i > exp {
+        result = result / 10.0
+        i = i - 1
+    }
+    result
+}
+
+/// Parse a run of decimal digits (with underscores between digits) for floats.
+fn parse_float_digits(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
+    var result = ""
+    var last_was_digit = false
     while !cursor_at_end(c) {
         let ch = cursor_peek(c)
         if ch >= "0" && ch <= "9" {
             result = result + ch
             cursor_advance(mut c)
-        } else if ch == "_" {
+            last_was_digit = true
+        } else if ch == "_" && last_was_digit {
             cursor_advance(mut c)
             let next = cursor_peek(c)
             if next >= "0" && next <= "9" {
                 result = result + "_"
+                last_was_digit = false
             } else {
                 return ParseError(c.line, c.col, "invalid character after underscore in float")
             }
@@ -773,70 +941,8 @@ fn parse_float(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
             break
         }
     }
-    // Check for decimal point
-    let dot = cursor_peek(c)
-    if dot == "." {
-        result = result + "."
-        cursor_advance(mut c)
-        // Must have at least one digit after decimal point
-        let ch = cursor_peek(c)
-        if ch < "0" || ch > "9" {
-            return ParseError(c.line, c.col, "no digits after decimal point in float")
-        }
-        while !cursor_at_end(c) {
-            let ch = cursor_peek(c)
-            if ch >= "0" && ch <= "9" {
-                result = result + ch
-                cursor_advance(mut c)
-            } else if ch == "_" {
-                cursor_advance(mut c)
-                let next = cursor_peek(c)
-                if next >= "0" && next <= "9" {
-                    result = result + "_"
-                } else {
-                    return ParseError(c.line, c.col, "invalid character after underscore in float")
-                }
-            } else {
-                break
-            }
-        }
-    }
-    // Check for exponent
-    let exp = cursor_peek(c)
-    if exp == "e" || exp == "E" {
-        result = result + exp
-        cursor_advance(mut c)
-        // Optional sign
-        let sign2 = cursor_peek(c)
-        if sign2 == "+" || sign2 == "-" {
-            result = result + sign2
-            cursor_advance(mut c)
-        }
-        // Must have at least one digit
-        let ch = cursor_peek(c)
-        if ch < "0" || ch > "9" {
-            return ParseError(c.line, c.col, "no digits in exponent of float")
-        }
-        while !cursor_at_end(c) {
-            let ch = cursor_peek(c)
-            if ch >= "0" && ch <= "9" {
-                result = result + ch
-                cursor_advance(mut c)
-            } else if ch == "_" {
-                cursor_advance(mut c)
-                let next = cursor_peek(c)
-                if next >= "0" && next <= "9" {
-                    result = result + "_"
-                } else {
-                    return ParseError(c.line, c.col, "invalid character after underscore in float")
-                }
-            } else {
-                break
-            }
-        }
-    }
-    if result == "" || result == "+" || result == "-" {
-        return ParseError(c.line, c.col, "empty float")
+    if result.ends_with("_") {
+        return ParseError(c.line, c.col, "trailing underscore in float")
     }
     result
 }

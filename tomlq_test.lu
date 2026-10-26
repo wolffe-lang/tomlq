@@ -251,7 +251,7 @@ fn test_floats_as_values() -> !int {
         expect(
             "1e2 tagged",
             tagged_of("a = 1e2"),
-            "{{\"a\":{{{{\"type\":\"float\",\"value\":\"100\"}}}}}}",
+            "{{\"a\":{{\"type\":\"float\",\"value\":\"100\"}}}}",
         )
     // 3.1e2 → 310/310.0
     bad = bad + expect("3.1e2 json", json_of("a = 3.1e2"), "{{\"a\":310.0}}")
@@ -267,7 +267,7 @@ fn test_floats_as_values() -> !int {
         expect(
             "-inf tagged",
             tagged_of("a = -inf"),
-            "{{\"a\":{{{{\"type\":\"float\",\"value\":\"-inf\"}}}}}}",
+            "{{\"a\":{{\"type\":\"float\",\"value\":\"-inf\"}}}}",
         )
     // nan → tagged nan, JSON "nan"
     bad = bad + expect("nan json", json_of("a = nan"), "{{\"a\":\"nan\"}}")
@@ -275,7 +275,7 @@ fn test_floats_as_values() -> !int {
         expect(
             "nan tagged",
             tagged_of("a = nan"),
-            "{{\"a\":{{{{\"type\":\"float\",\"value\":\"nan\"}}}}}}",
+            "{{\"a\":{{\"type\":\"float\",\"value\":\"nan\"}}}}",
         )
     // .5 refused
     if !json_of("a = .5").starts_with("ERR") {

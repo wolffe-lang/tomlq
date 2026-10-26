@@ -114,7 +114,15 @@ fn require_newline_or_eof(mut p: Parser) -> () ! {ParseError(int, int, str)} {
     }
     // Check for whitespace followed by newline/comment/EOF
     if ch == " " || ch == "\t" {
-        cursor_skip_ws(mut p.c)
+        // Skip only spaces and tabs, not newlines
+        while !cursor_at_end(p.c) {
+            let ch = cursor_peek(p.c)
+            if ch == " " || ch == "\t" {
+                cursor_advance(mut p.c)
+            } else {
+                break
+            }
+        }
         if cursor_at_end(p.c) {
             return
         }
@@ -435,23 +443,11 @@ fn parse_value(mut p: Parser) -> int ! {ParseError(int, int, str)} {
     }
     if kind == "integer" {
         let v = parse_integer(mut p.c)?
-        let i = v.to_int() else 0
-        return int_node(mut p.arena, i)
+        return int_node(mut p.arena, v)
     }
     if kind == "float" {
         let v = parse_float(mut p.c)?
-        let n = Node {
-            kind: 4,
-            b: false,
-            i: 0,
-            f: 0.0,
-            s: v,
-            kids: List[int](),
-            keys: List[str](),
-            defined_by: 0,
-        }
-        (mut p.arena).push(n)
-        return p.arena.len - 1
+        return float_node(mut p.arena, v)
     }
     if kind == "bool" {
         let v = parse_boolean(mut p.c)?

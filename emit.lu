@@ -19,7 +19,7 @@ fn emit_json_node(mut b: Sink, arena: List[Node], i: int) -> () ! {ParseError(in
     } else if kind == 3 {
         sink_push(mut b, "{node_int(arena, i)}")
     } else if kind == 4 {
-        sink_push(mut b, node_str(arena, i))
+        emit_json_float_value(mut b, node_float(arena, i))
     } else if kind == 5 {
         if node_bool(arena, i) {
             sink_push(mut b, "true")
@@ -115,6 +115,31 @@ fn emit_json_float(mut b: Sink, f: f64) {
     sink_push(mut b, "{f}")
 }
 
+/// Emit a float value as JSON: a number, or a string for inf/nan.
+fn emit_json_float_value(mut b: Sink, f: f64) {
+    // Check for inf/nan
+    if f != f {
+        // NaN
+        sink_push(mut b, "\"nan\"")
+        return
+    }
+    if f == 1.0 / 0.0 {
+        sink_push(mut b, "\"inf\"")
+        return
+    }
+    if f == -1.0 / 0.0 {
+        sink_push(mut b, "\"-inf\"")
+        return
+    }
+    // Regular float: print with "{v}" and add .0 if needed
+    let s = "{f}"
+    if !s.contains(".") && !s.contains("e") && !s.contains("E") {
+        sink_push(mut b, "{s}.0")
+    } else {
+        sink_push(mut b, s)
+    }
+}
+
 /// Emit a node as tagged JSON (corpus style).
 fn emit_tagged(arena: List[Node], i: int) -> str ! {ParseError(int, int, str)} {
     var b = sink_new()
@@ -134,7 +159,7 @@ fn emit_tagged_node(mut b: Sink, arena: List[Node], i: int) -> () ! {ParseError(
     } else if kind == 3 {
         emit_tagged_value(mut b, "integer", "{node_int(arena, i)}")
     } else if kind == 4 {
-        emit_tagged_value(mut b, "float", node_str(arena, i))
+        emit_tagged_float_value(mut b, node_float(arena, i))
     } else if kind == 5 {
         if node_bool(arena, i) {
             emit_tagged_value(mut b, "bool", "true")
@@ -159,6 +184,22 @@ fn emit_tagged_value(mut b: Sink, t: str, v: str) {
     sink_push(mut b, ",\"value\":")
     emit_json_string(mut b, v)
     sink_push(mut b, "}}")
+}
+
+/// Emit a float as tagged JSON.
+fn emit_tagged_float_value(mut b: Sink, f: f64) {
+    sink_push(mut b, "{{\"type\":\"float\",\"value\":\"")
+    // Check for inf/nan
+    if f != f {
+        sink_push(mut b, "nan")
+    } else if f == 1.0 / 0.0 {
+        sink_push(mut b, "inf")
+    } else if f == -1.0 / 0.0 {
+        sink_push(mut b, "-inf")
+    } else {
+        sink_push(mut b, "{f}")
+    }
+    sink_push(mut b, "\"}}")
 }
 
 /// Emit a table as tagged JSON.

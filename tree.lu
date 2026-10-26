@@ -5,7 +5,7 @@
 struct Node {
     kind: int,
     b: bool,
-    i: int,
+    i: i64,
     f: f64,
     s: str,
     kids: List[int],
@@ -62,7 +62,7 @@ fn string_node(mut arena: List[Node], s: str) -> int {
 }
 
 /// Create a new integer node. Returns its index.
-fn int_node(mut arena: List[Node], i: int) -> int {
+fn int_node(mut arena: List[Node], i: i64) -> int {
     let n = Node {
         kind: 3,
         b: false,
@@ -147,7 +147,7 @@ fn node_str(arena: List[Node], i: int) -> str {
 }
 
 /// Get the integer value of a node.
-fn node_int(arena: List[Node], i: int) -> int {
+fn node_int(arena: List[Node], i: int) -> i64 {
     arena[i].i
 }
 
