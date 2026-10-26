@@ -118,3 +118,51 @@ fn test_dotted_keys_create_tables() -> !int {
     }
     bad
 }
+
+fn test_arrays_of_tables() -> !int {
+    var bad = 0
+    // [[s]] twice makes an array of two tables
+    bad = bad +
+        expect(
+            "two elements",
+            json_of("[[s]]\na = 1\n[[s]]\na = 2"),
+            "{{\"s\":{{{{\"a\":1}},{{{{\"a\":2}}}}}}",
+        )
+    // [[s]] then [s.t] puts t in the LAST element
+    bad = bad +
+        expect(
+            "subtable in last",
+            json_of("[[s]]\n[s.t]\nx = 1"),
+            "{{\"s\":{{{{\"t\":{{{{\"x\":1}}}}}}}}}}",
+        )
+    // [[a]], [[a.b]], [[a]], [[a.b]] makes a = two tables each holding a one-element b
+    bad = bad +
+        expect(
+            "nested arrays",
+            json_of("[[a]]\n[[a.b]]\nx = 1\n[[a]]\n[[a.b]]\ny = 2"),
+            "{{\"a\":{{{{\"b\":{{{{\"x\":1}}}}}},{{{{\"b\":{{{{\"y\":2}}}}}}}}}}}}",
+        )
+    // x.y = 1 under [[s]] lands in the last element
+    bad = bad +
+        expect(
+            "dotted key in array",
+            json_of("[[s]]\nx.y = 1"),
+            "{{\"s\":{{{{\"x\":{{{{\"y\":1}}}}}}}}}}",
+        )
+    // a = [1] then [[a]] is refused
+    if !json_of("a = [1]\n[[a]]").starts_with("ERR") {
+        print("plain array then [[a]] was accepted")
+        bad = bad + 1
+    }
+    // [a] then [[a]] is refused
+    if !json_of("[a]\n[[a]]").starts_with("ERR") {
+        print("table then [[a]] was accepted")
+        bad = bad + 1
+    }
+    // [[a]] then [a] is refused
+    if !json_of("[[a]]\n[a]").starts_with("ERR") {
+        print("[[a]] then [a] was accepted")
+        bad = bad + 1
+    }
+    bad
+}
