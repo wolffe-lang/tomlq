@@ -18,7 +18,9 @@ three new rows, `./tomlq --version` → `tomlq 0.1.2 (built with wolf 0.2.34)`, 
    Commit "Refuse a --spec directory that is not a corpus".
 3. In the dispatch, the final `return not_implemented()` becomes `return usage_err()`; delete `not_implemented`. Commit
    "A PATH without a FILE is a usage error".
-4. `VERSION`/`--version` 0.1.2; CHANGELOG `## 0.1.2 (<today>)` with the three lines. Commit "Release 0.1.2".
+4. README `## Tests`: "32 rows in test.sh" → the count `./test.sh | grep -c '^ok'` prints after §1 (37 today + 3 = 40). Commit
+   "README: the row count".
+5. `VERSION`/`--version` 0.1.2; CHANGELOG `## 0.1.2 (<today>)` with the three lines. Commit "Release 0.1.2".
 
 ## Verify (paste): `wolf build main.lu -o tomlq && wolf fmt --check *.lu && wolf test . | tail -1`; `./test.sh; echo "exit=$?"`;
 `git status --short`. Stop.
