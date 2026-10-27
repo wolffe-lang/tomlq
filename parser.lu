@@ -477,6 +477,8 @@ fn parse_key(mut p: Parser) -> List[str] ! {ParseError(int, int, str)} {
 
 /// Parse a key = value pair.
 fn parse_key_value(mut p: Parser) -> int ! {ParseError(int, int, str)} {
+    let key_line = p.c.line
+    let key_col = p.c.col
     let segments = parse_key(mut p)?
     // Skip only spaces and tabs, not newlines
     cursor_skip_spaces(mut p.c)
@@ -546,7 +548,7 @@ fn parse_key_value(mut p: Parser) -> int ! {ParseError(int, int, str)} {
     }
     let value_node = parse_value(mut p)?
     // Walk the segments: every segment but the last finds or creates a table
-    add_key_for_segments(mut p, p.current, segments, value_node)?
+    add_key_for_segments(mut p, p.current, segments, value_node, key_line, key_col)?
     // Check that the value is followed by a newline, comment, or EOF
     require_newline_or_eof(mut p)?
     value_node
@@ -554,12 +556,12 @@ fn parse_key_value(mut p: Parser) -> int ! {ParseError(int, int, str)} {
 
 /// Add a key for a list of segments, descending through intermediate tables.
 /// Where a segment names an array of tables, resolve into its last element.
-fn add_key_for_segments(mut p: Parser, parent: int, segments: List[str], value_node: int) -> () ! {
+fn add_key_for_segments(mut p: Parser, parent: int, segments: List[str], value_node: int, key_line: int, key_col: int) -> () ! {
     ParseError(int, int, str),
 } {
     let n = segments.len
     if n == 0 {
-        return ParseError(p.c.line, p.c.col, "empty key")
+        return ParseError(key_line, key_col, "empty key")
     }
     // Walk all segments except the last, descending through tables
     var current = parent
@@ -572,7 +574,7 @@ fn add_key_for_segments(mut p: Parser, parent: int, segments: List[str], value_n
     }
     // Last segment: add the value
     let last = segments[n - 1]
-    may_define(p, current, last, 5)?
+    may_define_at(p, current, last, 5, key_line, key_col)?
     add_key(mut p.arena, current, last, value_node)
 }
 
@@ -606,7 +608,7 @@ fn may_define(p: Parser, parent: int, key: str, how: int) -> () ! {ParseError(in
     }
     // The key holds a value (not a table or array)
     if kind != 0 && kind != 1 {
-        return ParseError(p.c.line, p.c.col, "key already defined")
+        return ParseError(p.c.line, p.c.col, "key {key} already defined")
     }
     // The key holds an array
     if kind == 1 {
@@ -616,7 +618,7 @@ fn may_define(p: Parser, parent: int, key: str, how: int) -> () ! {ParseError(in
         }
         // how 5 (key=value) into an array is refused
         if how == 5 {
-            return ParseError(p.c.line, p.c.col, "key already defined")
+            return ParseError(p.c.line, p.c.col, "key {key} already defined")
         }
         // how 4 ([[header]]) into an array: check if it's an array of tables or a value array
         if how == 4 {
@@ -676,7 +678,7 @@ fn may_define(p: Parser, parent: int, key: str, how: int) -> () ! {ParseError(in
         }
         // how 5 (key=value) into a table is refused
         if how == 5 {
-            return ParseError(p.c.line, p.c.col, "key already defined")
+            return ParseError(p.c.line, p.c.col, "key {key} already defined")
         }
         // how 1 (dotted descent) into a table defined by 1 or 3 in a different block → refuse
         if how == 1 &&
@@ -686,7 +688,83 @@ fn may_define(p: Parser, parent: int, key: str, how: int) -> () ! {ParseError(in
         }
         return
     }
-    return ParseError(p.c.line, p.c.col, "key already defined")
+    return ParseError(p.c.line, p.c.col, "key {key} already defined")
+}
+
+/// Like may_define but with an explicit position.
+fn may_define_at(p: Parser, parent: int, key: str, how: int, line: int, col: int) -> () ! {ParseError(int, int, str)} {
+    let kid = find_child(p.arena, parent, key) else -1
+    if kid < 0 {
+        return
+    }
+    let kind = node_kind(p.arena, kid)
+    if p.arena[kid].closed {
+        return ParseError(line, col, "inline table is closed")
+    }
+    if kind != 0 && kind != 1 {
+        return ParseError(line, col, "key {key} already defined")
+    }
+    if kind == 1 {
+        if how == 3 {
+            return ParseError(line, col, "array of tables conflicts")
+        }
+        if how == 5 {
+            return ParseError(line, col, "key {key} already defined")
+        }
+        if how == 4 {
+            let defined_by = node_defined_by(p.arena, kid)
+            if defined_by == 2 {
+                return ParseError(line, col, "array of tables conflicts")
+            }
+            let nkids = node_kid_len(p.arena, kid)
+            if nkids == 0 {
+                return
+            }
+            let first = node_kid_at(p.arena, kid, 0)
+            let first_kind = node_kind(p.arena, first)
+            if first_kind != 0 {
+                return ParseError(line, col, "array of tables conflicts")
+            }
+            return
+        }
+        if how == 6 {
+            let nkids = node_kid_len(p.arena, kid)
+            if nkids == 0 {
+                return ParseError(line, col, "key already defined")
+            }
+            let first = node_kid_at(p.arena, kid, 0)
+            let first_kind = node_kind(p.arena, first)
+            if first_kind != 0 {
+                return ParseError(line, col, "key already defined")
+            }
+            return
+        }
+        return ParseError(line, col, "key already defined")
+    }
+    if kind == 0 {
+        if p.arena[parent].closed && (how == 3 || how == 4) {
+            return ParseError(line, col, "table is closed")
+        }
+        if (how == 3 || how == 4) && node_defined_by(p.arena, kid) == 5 {
+            return ParseError(line, col, "table defined by dotted keys")
+        }
+        if how == 3 && node_defined_by(p.arena, kid) == 3 {
+            return ParseError(line, col, "table defined twice")
+        }
+        if how == 4 {
+            return ParseError(line, col, "array of tables conflicts")
+        }
+        if how == 5 {
+            return ParseError(line, col, "key {key} already defined")
+        }
+        if how == 1 &&
+            (node_defined_by(p.arena, kid) == 1 || node_defined_by(p.arena, kid) == 3) &&
+            node_block(p.arena, kid) != p.block {
+            return ParseError(line, col, "key already defined")
+        }
+        return
+    }
+    return ParseError(line, col, "key {key} already defined")
 }
 
 /// Parse a value.
@@ -806,7 +884,7 @@ fn parse_inline_table(mut p: Parser) -> int ! {ParseError(int, int, str)} {
         // Skip only spaces and tabs, not newlines
         cursor_skip_spaces(mut p.c)
         let value_node = parse_value(mut p)?
-        add_key_for_segments(mut p, table_node, segments, value_node)?
+        add_key_for_segments(mut p, table_node, segments, value_node, p.c.line, p.c.col)?
         // Skip only spaces and tabs, not newlines
         cursor_skip_spaces(mut p.c)
         let ch4 = cursor_peek(p.c)

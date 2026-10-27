@@ -61,6 +61,9 @@ if bash tools/fetch-corpus.sh > .fetch-out 2>&1; then
   done
   [ $nbad -eq 0 ] && pass "U1    stdin and file agree on all 208 valid cases" || fail "U1    stdin differs from file on $nbad cases" "first:$bad"
   [ $nj -eq 0 ] && pass "J1    --json is JSON on all 208 valid cases" || fail "J1    --json not JSON (or refused) on $nj cases" "first:$badj"
+  sv=$(./tomlq --spec toml-test/tests 2>/dev/null | awk '/^valid:/ {print $2}')
+  si=$(./tomlq --spec toml-test/tests 2>/dev/null | awk '/^invalid:/ {print $2}')
+  [ "$sv" = "$v" ] && [ "$si" = "$i" ] && pass "S0    tomlq --spec agrees with toml-test's runner ($sv, $si)" || fail "S0    tomlq --spec says $sv, $si; toml-test's runner says $v, $i"
 else
   fail "S1    corpus fetch or runner build failed" "$(tail -n 3 .fetch-out)"
 fi
