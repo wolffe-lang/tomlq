@@ -1,0 +1,547 @@
+//! check: run(exit=0)
+
+use std.bytes
+use std.fmt.decimal
+
+/// Read a toml-test tagged JSON document into the arena; returns the root's index.
+fn read_tagged(mut arena: List[Node], text: str) -> int ! {ParseError(int, int, str)} {
+    var pos = 0
+    skip_ws(mut pos, text)
+    if pos >= text.len {
+        return ParseError(0, 0, "empty JSON")
+    }
+    let root = read_value(mut arena, mut pos, text)?
+    root
+}
+
+/// Skip whitespace in text starting at pos.
+fn skip_ws(mut pos: int, text: str) {
+    while pos < text.len {
+        let ch = text.get(pos..pos + 1) else ""
+        if ch == " " || ch == "\n" || ch == "\r" || ch == "\t" {
+            pos = pos + 1
+        } else {
+            break
+        }
+    }
+}
+
+/// Get a single character at pos, or "" if at end.
+fn char_at_pos(s: str, pos: int) -> str {
+    if pos >= s.len {
+        return ""
+    }
+    var n = 1
+    while n <= 4 && pos + n <= s.len {
+        let ch = s.get(pos..pos + n) else ""
+        if ch != "" {
+            return ch
+        }
+        n = n + 1
+    }
+    ""
+}
+
+/// Read a JSON string starting at pos (the opening " is at pos).
+fn read_string(mut pos: int, text: str) -> str ! {ParseError(int, int, str)} {
+    if pos >= text.len {
+        return ParseError(0, 0, "unexpected end of JSON")
+    }
+    let ch = text.get(pos..pos + 1) else ""
+    if ch != "\"" {
+        return ParseError(0, 0, "expected \"")
+    }
+    pos = pos + 1
+    var result = ""
+    while pos < text.len {
+        let c = char_at(text, pos)
+        if c == "" {
+            break
+        }
+        if c == "\"" {
+            pos = pos + 1
+            return result
+        }
+        if c == "\\" {
+            pos = pos + 1
+            if pos >= text.len {
+                return ParseError(0, 0, "unexpected end of JSON in string escape")
+            }
+            let esc = text.get(pos..pos + 1) else ""
+            pos = pos + 1
+            if esc == "\"" {
+                result = result + "\""
+            } else if esc == "\\" {
+                result = result + "\\"
+            } else if esc == "/" {
+                result = result + "/"
+            } else if esc == "b" {
+                result = result + "\x08"
+            } else if esc == "f" {
+                result = result + "\x0C"
+            } else if esc == "n" {
+                result = result + "\n"
+            } else if esc == "r" {
+                result = result + "\r"
+            } else if esc == "t" {
+                result = result + "\t"
+            } else if esc == "u" {
+                if pos + 4 > text.len {
+                    return ParseError(0, 0, "incomplete \\u escape")
+                }
+                let hex = text.get(pos..pos + 4) else ""
+                pos = pos + 4
+                var cp = parse_hex4_str(hex) else {
+                    return ParseError(0, 0, "invalid \\u escape")
+                }
+                if cp >= 0xD800 && cp <= 0xDBFF {
+                    if pos + 6 <= text.len &&
+                        (text.get(pos..pos + 1) else "") == "\\" &&
+                        (text.get(pos + 1..pos + 2) else "") == "u" {
+                        pos = pos + 2
+                        let hex2 = text.get(pos..pos + 4) else ""
+                        pos = pos + 4
+                        let cp2 = parse_hex4_str(hex2) else {
+                            return ParseError(0, 0, "invalid surrogate pair")
+                        }
+                        if cp2 >= 0xDC00 && cp2 <= 0xDFFF {
+                            cp = 0x10000 + (cp - 0xD800) * 0x400 + (cp2 - 0xDC00)
+                        } else {
+                            return ParseError(0, 0, "invalid surrogate pair")
+                        }
+                    } else {
+                        return ParseError(0, 0, "missing low surrogate")
+                    }
+                }
+                result = result + cp_to_str(cp)
+            } else {
+                return ParseError(0, 0, "invalid escape \\{esc}")
+            }
+        } else {
+            result = result + c
+            pos = pos + c.len
+        }
+    }
+    return ParseError(0, 0, "unexpected end of JSON in string")
+}
+
+/// Parse 4 hex digits into an int.
+fn parse_hex4_str(s: str) -> int ! {ParseError(int, int, str)} {
+    if s.len != 4 {
+        return ParseError(0, 0, "invalid hex")
+    }
+    var val = 0
+    var i = 0
+    while i < 4 {
+        let ch = s.get(i..i + 1) else ""
+        let d = hex_val(ch)
+        if d < 0 {
+            return ParseError(0, 0, "invalid hex digit")
+        }
+        val = val * 16 + d
+        i = i + 1
+    }
+    val
+}
+
+/// Return the numeric value of a hex digit, or -1.
+fn hex_val(ch: str) -> int {
+    if ch >= "0" && ch <= "9" {
+        return ch.to_int() else -1
+    }
+    if ch == "a" { return 10 }
+    if ch == "b" { return 11 }
+    if ch == "c" { return 12 }
+    if ch == "d" { return 13 }
+    if ch == "e" { return 14 }
+    if ch == "f" { return 15 }
+    if ch == "A" { return 10 }
+    if ch == "B" { return 11 }
+    if ch == "C" { return 12 }
+    if ch == "D" { return 13 }
+    if ch == "E" { return 14 }
+    if ch == "F" { return 15 }
+    -1
+}
+
+/// Encode a Unicode code point as UTF-8.
+fn cp_to_str(cp: int) -> str {
+    var out = List[byte]()
+    if cp < 0x80 {
+        (mut out).push(cp as byte)
+    } else if cp < 0x800 {
+        (mut out).push((0xC0 + cp / 64) as byte)
+        (mut out).push((0x80 + cp % 64) as byte)
+    } else if cp < 0x10000 {
+        (mut out).push((0xE0 + cp / 4096) as byte)
+        (mut out).push((0x80 + cp / 64 % 64) as byte)
+        (mut out).push((0x80 + cp % 64) as byte)
+    } else {
+        (mut out).push((0xF0 + cp / 262144) as byte)
+        (mut out).push((0x80 + cp / 4096 % 64) as byte)
+        (mut out).push((0x80 + cp / 64 % 64) as byte)
+        (mut out).push((0x80 + cp % 64) as byte)
+    }
+    bytes.to_str(out) else ""
+}
+
+/// Read a JSON value. Returns the node index.
+fn read_value(mut arena: List[Node], mut pos: int, text: str) -> int ! {ParseError(int, int, str)} {
+    skip_ws(mut pos, text)
+    if pos >= text.len {
+        return ParseError(0, 0, "unexpected end of JSON")
+    }
+    let ch = char_at_pos(text, pos)
+    if ch == "{{" {
+        return read_object(mut arena, mut pos, text)
+    }
+    if ch == "[" {
+        return read_array(mut arena, mut pos, text)
+    }
+    if ch == "\"" {
+        let s = read_string(mut pos, text)?
+        return string_node(mut arena, s)
+    }
+    if ch == "t" {
+        if (text.get(pos..pos + 4) else "") != "true" {
+            return ParseError(0, 0, "invalid JSON")
+        }
+        pos = pos + 4
+        return bool_node(mut arena, true)
+    }
+    if ch == "f" {
+        if (text.get(pos..pos + 5) else "") != "false" {
+            return ParseError(0, 0, "invalid JSON")
+        }
+        pos = pos + 5
+        return bool_node(mut arena, false)
+    }
+    if ch == "n" {
+        if (text.get(pos..pos + 4) else "") != "null" {
+            return ParseError(0, 0, "invalid JSON")
+        }
+        pos = pos + 4
+        return string_node(mut arena, "")
+    }
+    // Number or other — read as text
+    var end = pos
+    while end < text.len {
+        let c = char_at_pos(text, end)
+        if c == "," || c == "}}" || c == "]" || c == " " || c == "\n" || c == "\r" || c == "\t" {
+            break
+        }
+        end = end + c.len
+    }
+    let text2 = text.get(pos..end) else ""
+    pos = end
+    return string_node(mut arena, text2)
+}
+
+/// Read a JSON array. Returns the node index.
+fn read_array(mut arena: List[Node], mut pos: int, text: str) -> int ! {ParseError(int, int, str)} {
+    pos = pos + 1
+    let arr = array_node(mut arena)
+    skip_ws(mut pos, text)
+    if pos < text.len && char_at_pos(text, pos) == "]" {
+        pos = pos + 1
+        return arr
+    }
+    while pos < text.len {
+        let elem = read_value(mut arena, mut pos, text)?
+        add_child(mut arena, arr, elem)
+        skip_ws(mut pos, text)
+        if pos >= text.len {
+            return ParseError(0, 0, "unexpected end of JSON in array")
+        }
+        let ch = char_at_pos(text, pos)
+        if ch == "]" {
+            pos = pos + 1
+            return arr
+        }
+        if ch == "," {
+            pos = pos + 1
+            skip_ws(mut pos, text)
+        } else {
+            return ParseError(0, 0, "expected , or ] in array")
+        }
+    }
+    return ParseError(0, 0, "unexpected end of JSON in array")
+}
+
+/// Read a JSON object. Returns the node index.
+fn read_object(mut arena: List[Node], mut pos: int, text: str) -> int ! {
+    ParseError(int, int, str),
+} {
+    pos = pos + 1
+    skip_ws(mut pos, text)
+    if pos < text.len && char_at_pos(text, pos) == "}}" {
+        pos = pos + 1
+        return table_node(mut arena, 0, 0)
+    }
+    var keys = List[str]()
+    var values = List[int]()
+    while pos < text.len {
+        let key = read_string(mut pos, text)?
+        skip_ws(mut pos, text)
+        if pos >= text.len || char_at_pos(text, pos) != ":" {
+            return ParseError(0, 0, "expected : in object")
+        }
+        pos = pos + 1
+        let val = read_value(mut arena, mut pos, text)?
+        (mut keys).push(key)
+        (mut values).push(val)
+        skip_ws(mut pos, text)
+        if pos >= text.len {
+            return ParseError(0, 0, "unexpected end of JSON in object")
+        }
+        let ch = char_at_pos(text, pos)
+        if ch == "}}" {
+            pos = pos + 1
+            break
+        }
+        if ch == "," {
+            pos = pos + 1
+            skip_ws(mut pos, text)
+        } else {
+            return ParseError(0, 0, "expected , or }} in object")
+        }
+    }
+    // Check if this is a leaf (type/value object)
+    if keys.len == 2 {
+        let k0 = keys[0]
+        let k1 = keys[1]
+        if k0 == "type" && k1 == "value" || k0 == "value" && k1 == "type" {
+            let type_idx = if k0 == "type" { 0 } else { 1 }
+            let val_idx = if type_idx == 0 { 1 } else { 0 }
+            let type_str = node_str(arena, values[type_idx])
+            let value_str = node_str(arena, values[val_idx])
+            let kind = type_to_kind(type_str) else {
+                return ParseError(0, 0, "unknown type: {type_str}")
+            }
+            return make_leaf(mut arena, kind, value_str)
+        }
+    }
+    // Regular table
+    let tbl = table_node(mut arena, 0, 0)
+    var i = 0
+    while i < keys.len {
+        add_key(mut arena, tbl, keys[i], values[i])
+        i = i + 1
+    }
+    tbl
+}
+
+/// Map a type name to a node kind.
+fn type_to_kind(s: str) -> int ! {ParseError(int, int, str)} {
+    if s == "string" { return 2 }
+    if s == "integer" { return 3 }
+    if s == "float" { return 4 }
+    if s == "bool" { return 5 }
+    if s == "datetime" { return 6 }
+    if s == "datetime-local" { return 7 }
+    if s == "date-local" { return 8 }
+    if s == "time-local" { return 9 }
+    return ParseError(0, 0, "unknown type: {s}")
+}
+
+/// Make a leaf node with the given kind and value text.
+fn make_leaf(mut arena: List[Node], kind: int, value: str) -> int {
+    if kind == 2 {
+        return string_node(mut arena, value)
+    }
+    if kind == 3 {
+        let i = value.to_int() else 0
+        return int_node(mut arena, i as i64)
+    }
+    if kind == 4 {
+        let f = decimal.parse_float(value) else 0.0
+        return float_node(mut arena, f)
+    }
+    if kind == 5 {
+        let b = value == "true"
+        return bool_node(mut arena, b)
+    }
+    return datetime_node(mut arena, value, kind)
+}
+
+/// Compare two trees. Returns "" when equal, else a diff string.
+fn tree_diff(a: List[Node], ia: int, b: List[Node], ib: int, path: str) -> str {
+    let ka = node_kind(a, ia)
+    let kb = node_kind(b, ib)
+    if ka != kb {
+        return "{path}: kind {ka} != {kb}"
+    }
+    if ka == 0 {
+        let na = node_key_len(a, ia)
+        let nb = node_key_len(b, ib)
+        if na != nb {
+            return "{path}: keys {na} != {nb}"
+        }
+        var i = 0
+        while i < na {
+            let key = node_key_at(a, ia, i)
+            let akid = node_kid_at(a, ia, i)
+            var found = false
+            var j = 0
+            while j < nb {
+                if node_key_at(b, ib, j) == key {
+                    let bkid = node_kid_at(b, ib, j)
+                    let child_path = if path == "" { key } else { "{path}.{key}" }
+                    let diff = tree_diff(a, akid, b, bkid, child_path)
+                    if diff != "" {
+                        return diff
+                    }
+                    found = true
+                    break
+                }
+                j = j + 1
+            }
+            if !found {
+                return "{path}: key {key} not found"
+            }
+            i = i + 1
+        }
+        return ""
+    }
+    if ka == 1 {
+        let na = node_kid_len(a, ia)
+        let nb = node_kid_len(b, ib)
+        if na != nb {
+            return "{path}: array len {na} != {nb}"
+        }
+        var i = 0
+        while i < na {
+            let akid = node_kid_at(a, ia, i)
+            let bkid = node_kid_at(b, ib, i)
+            let child_path = "{path}[{i}]"
+            let diff = tree_diff(a, akid, b, bkid, child_path)
+            if diff != "" {
+                return diff
+            }
+            i = i + 1
+        }
+        return ""
+    }
+    if ka == 2 {
+        let sa = node_str(a, ia)
+        let sb = node_str(b, ib)
+        if sa != sb {
+            return "{path}: \"{sa}\" != \"{sb}\""
+        }
+        return ""
+    }
+    if ka == 3 {
+        let ia2 = node_int(a, ia)
+        let ib2 = node_int(b, ib)
+        if ia2 != ib2 {
+            return "{path}: {ia2} != {ib2}"
+        }
+        return ""
+    }
+    if ka == 4 {
+        let fa = node_float(a, ia)
+        let fb = node_float(b, ib)
+        if fa != fa && fb != fb {
+            return ""
+        }
+        if fa != fb {
+            return "{path}: {fa} != {fb}"
+        }
+        return ""
+    }
+    if ka == 5 {
+        let ba = node_bool(a, ia)
+        let bb = node_bool(b, ib)
+        if ba != bb {
+            return "{path}: {ba} != {bb}"
+        }
+        return ""
+    }
+    if ka >= 6 && ka <= 9 {
+        let sa = node_str(a, ia)
+        let sb = node_str(b, ib)
+        let na = normalize_datetime(sa)
+        let nb = normalize_datetime(sb)
+        if na != nb {
+            return "{path}: \"{na}\" != \"{nb}\""
+        }
+        return ""
+    }
+    return "{path}: unknown kind {ka}"
+}
+
+/// Normalise a datetime string: t/space -> T, z -> Z, fractional seconds normalised.
+fn normalize_datetime(s: str) -> str {
+    var result = ""
+    var i = 0
+    while i < s.len {
+        let ch = s.get(i..i + 1) else ""
+        if ch == "t" {
+            result = result + "T"
+        } else if ch == "z" {
+            result = result + "Z"
+        } else {
+            result = result + ch
+        }
+        i = i + 1
+    }
+    // Normalise fractional seconds: parse as float, re-format with 3 digits
+    var dot_pos = -1
+    var j = 0
+    while j < result.len {
+        if (result.get(j..j + 1) else "") == "." {
+            dot_pos = j
+            break
+        }
+        j = j + 1
+    }
+    if dot_pos >= 0 {
+        var frac_end = dot_pos + 1
+        while frac_end < result.len {
+            let c = result.get(frac_end..frac_end + 1) else ""
+            if c >= "0" && c <= "9" {
+                frac_end = frac_end + 1
+            } else {
+                break
+            }
+        }
+        let frac_str = result.get(dot_pos + 1..frac_end) else ""
+        if frac_str.len > 0 {
+            let frac_val = decimal.parse_float("0." + frac_str) else 0.0
+            let frac_int = (frac_val * 1000 + 0.5) as int
+            let frac_formatted = pad3(frac_int)
+            let prefix = result.get(0..dot_pos + 1) else ""
+            let suffix = result.get(frac_end..) else ""
+            result = prefix + frac_formatted + suffix
+        }
+    }
+    result
+}
+
+/// Pad to 3 digits.
+fn pad3(n: int) -> str {
+    if n < 10 {
+        "00{n}"
+    } else if n < 100 {
+        "0{n}"
+    } else {
+        "{n}"
+    }
+}
+
+/// Compare two trees. Returns true when equal.
+fn tree_equal(a: List[Node], ia: int, b: List[Node], ib: int) -> bool {
+    tree_diff(a, ia, b, ib, "") == ""
+}
+
+fn tagged_read_main() -> !int {
+    var arena = List[Node]()
+    let text = "{{\"type\":\"string\",\"value\":\"hello\"}}"
+    let root = read_tagged(mut arena, text) else |e| {
+        print("error: {e}")
+        return 1
+    }
+    print("kind: {node_kind(arena, root)}")
+    print("value: {node_str(arena, root)}")
+    0
+}
