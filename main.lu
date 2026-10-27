@@ -200,7 +200,7 @@ fn navigate_path(arena: List[Node], root: int, path: str) -> int {
             pos = end + 1
             // Index into array
             if node_kind(arena, current) != 1 {
-                return -1
+                return -2
             }
             let nkids = node_kid_len(arena, current)
             if idx >= nkids {
@@ -247,7 +247,7 @@ fn navigate_path(arena: List[Node], root: int, path: str) -> int {
         }
         // Find key in current node
         if node_kind(arena, current) != 0 {
-            return -1
+            return -2
         }
         let nkeys = node_key_len(arena, current)
         var found = false
@@ -329,6 +329,11 @@ fn query_file(path: str, file: str, action: str) -> !int {
     }
     let node = navigate_path(p.arena, root, path)
     if node < 0 {
+        if node == -2 {
+            eprint("tomlq: {path}: not a table\n")
+        } else {
+            eprint("tomlq: {path}: not found\n")
+        }
         return 1
     }
     if action == "keys" {
@@ -556,12 +561,20 @@ fn main() -> !int {
             eprint("tomlq: missing file argument\n")
             return 2
         }
+        if args.len > 2 {
+            eprint("tomlq: unexpected operand: {args[2]}\n")
+            return usage_err()
+        }
         return json_file(args[1])
     }
     if args[0] == "--tagged" {
         if args.len < 2 {
             eprint("tomlq: missing file argument\n")
             return 2
+        }
+        if args.len > 2 {
+            eprint("tomlq: unexpected operand: {args[2]}\n")
+            return usage_err()
         }
         return tagged_file(args[1])
     }
@@ -610,6 +623,10 @@ fn main() -> !int {
     }
     // Check for PATH FILE form (no flag)
     if args.len >= 2 && !args[0].starts_with("-") {
+        if args.len > 2 {
+            eprint("tomlq: unexpected operand: {args[2]}\n")
+            return usage_err()
+        }
         return query_file(args[0], args[1], "json")
     }
     // Unknown option
