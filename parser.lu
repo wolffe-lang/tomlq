@@ -51,6 +51,13 @@ fn parser_init(text: str) -> Parser {
 
 /// Parse a TOML document. Returns the root node index.
 fn parse_document(mut p: Parser) -> int ! {ParseError(int, int, str)} {
+    // Skip a leading byte-order mark (U+FEFF, EF BB BF in UTF-8)
+    if p.c.pos + 2 < p.c.s.len {
+        let prefix = p.c.s.get(p.c.pos..p.c.pos + 3) else ""
+        if prefix == "\u{FEFF}" {
+            p.c.pos = p.c.pos + 3
+        }
+    }
     while !cursor_at_end(p.c) {
         cursor_skip_ws_comment(mut p.c)?
         if cursor_at_end(p.c) {
