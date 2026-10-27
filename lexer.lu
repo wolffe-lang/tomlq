@@ -1,6 +1,7 @@
 //! check: run(exit=0)
 
 use std.bytes
+use std.fmt.decimal
 
 /// A cursor into a byte string, tracking line and column.
 struct Cursor {
@@ -958,15 +959,6 @@ fn parse_float(mut c: Cursor) -> f64 ! {ParseError(int, int, str)} {
 }
 
 /// 10^n as an int.
-fn pow10(n: int) -> int {
-    var result = 1
-    var i = 0
-    while i < n {
-        result = result * 10
-        i = i + 1
-    }
-    result
-}
 
 /// Parse a string as an f64. Returns 0.0 on error.
 fn parse_float_str(s: str) -> f64 ! {ParseError(int, int, str)} {
@@ -980,56 +972,9 @@ fn parse_float_str(s: str) -> f64 ! {ParseError(int, int, str)} {
     if s == "nan" {
         return 0.0 / 0.0
     }
-    // Parse the integer part
-    var dot_pos = s.find(".") else -1
-    var exp_pos = s.find("e") else -1
-    if exp_pos < 0 {
-        exp_pos = s.find("E") else -1
-    }
-    var int_part = 0
-    var frac_part = 0
-    var frac_scale = 1
-    var exp = 0
-    if dot_pos >= 0 {
-        let int_str = s.get(0..dot_pos) else ""
-        int_part = int_str.to_int() else 0
-        let frac_str = s.get(dot_pos + 1..) else ""
-        if exp_pos >= 0 {
-            let exp_in_frac = exp_pos - dot_pos - 1
-            let frac_before_exp = frac_str.get(0..exp_in_frac) else ""
-            frac_part = frac_before_exp.to_int() else 0
-            frac_scale = pow10(frac_before_exp.len)
-            let exp_str = frac_str.get(exp_in_frac + 1..) else ""
-            exp = exp_str.to_int() else 0
-        } else {
-            frac_part = frac_str.to_int() else 0
-            frac_scale = pow10(frac_str.len)
-        }
-    } else if exp_pos >= 0 {
-        let int_str = s.get(0..exp_pos) else ""
-        int_part = int_str.to_int() else 0
-        let exp_str = s.get(exp_pos + 1..) else ""
-        exp = exp_str.to_int() else 0
-    } else {
-        int_part = s.to_int() else 0
-    }
-    // Combine
-    var result = int_part as f64 + frac_part as f64 / frac_scale as f64
-    // Apply exponent (multiply by 10^exp)
-    if exp > 0 {
-        var i = 0
-        while i < exp {
-            result = result * 10.0
-            i = i + 1
-        }
-    } else if exp < 0 {
-        var i = 0
-        while i < -exp {
-            result = result / 10.0
-            i = i + 1
-        }
-    }
-    result
+    // Use decimal.parse_float for exact parsing
+    let v = decimal.parse_float(s) else 0.0
+    v
 }
 
 /// Parse a run of decimal digits (with underscores between digits) for floats.

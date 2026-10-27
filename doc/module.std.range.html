@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="wolf doc">
+<title>std.range — pkg</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<p class="crumb"><a href="index.html">pkg</a> / <code>std.range</code></p>
+<h1><code>std.range</code></h1>
+<p>std.range — operations over the language's <code>a..b</code>. Stability tier: core.</p>
+<p><strong>Four functions, all O(1), on the two accessors <code>[type.range]</code> gave the type at wolf 0.2.14 (s158, wolf-lang#24; F-0030 CLOSED).</strong> A <code>range[int]</code> is a nameable type with <code>start</code> and <code>end</code> as properties, and <code>end</code> is EXCLUSIVE, always: <code>a..=b</code> normalizes at construction to <code>end = b + 1</code> under <code>[mem.iter.range]</code>'s checked arithmetic, so <code>(2..=7).end</code> is 8 and <code>r.end - r.start</code> is the count for both spellings (<code>[type.range.accessor]</code>). That one exclusive <code>end</code> is what makes <code>contains</code>, <code>len</code> and <code>clamp_to</code> writable at all. sc04 reviewed their signatures and F-0030 recorded them as unwritable for eleven sprints, because the only spelling was iteration: O(len) for an O(1) question, and a hang rather than an answer on <code>0..9223372036854775807</code>. <code>is_empty</code> shipped alone, on the one fact iteration can decide in O(1), and is now the same comparison as the other three.</p>
+<p><strong>A reversed range is a legal, empty value.</strong> <code>7..3</code> iterates zero times — <code>[mem.iter.range]</code> steps ascending while <code>&lt; end</code> — so <code>is_empty(7..3)</code> is true, and its raw <code>end - start</code> is <strong>-4</strong>, measured at wolf 0.2.14 on both rungs. <code>len</code> therefore answers the COUNT of values a <code>for</code> would yield, which is 0 there, and not the signed difference wolf-std#30 spelled: a function named <code>len</code> that answers a negative number is the wrong-on-legal-input shape sc03's refusal-over-approximation rule (§9) does not ship. <code>clamp_to</code> on an empty range has no member to answer with and raises <code>none</code> (§2: absence is a row tag, never a sentinel), a row the reviewed signature did not carry; returning <code>start</code> — a number the range does not contain — would be the same wrong answer under a different name.</p>
+<p><strong>Lane words, named.</strong> Both compiler rungs run every row here at 0.2.14. The reference machine (lupin 0.1.36) conforms to <code>a7f517e</code> = v0.2.12 and has not mirrored <code>[type.range.accessor]</code>: <code>r.start</code> and <code>r.end</code> are declined BY NAME at resolve there — &quot;a range has no member <code>start</code>&quot;, F-0030's sentence, a whole-program <code>unsupported</code> and never a diagnostic — so every test in <code>tests/range/</code> is <code>unsupported</code> on lupin, <code>is_empty</code>'s included (it ran there while its body was a loop). The examples below are FENCED, under the extractor's <code>mirror-lag</code> word (<code>LUPIN_MIRROR_LAG</code>, wolf-std#37, sc49): both compiler rungs must run each block to <code>exit(0)</code>, and the reference lane must decline it with exactly that sentence. They were prose at sc48 because <code>doc-examples</code> accepted a lupin <code>unsupported</code> only for capability modules, and a fence would have been a red. The release that mirrors the clause reds the five lupin test rows (deeper than the ledger) AND these four blocks on the same day, and the entry leaves in the commit that flips them.</p>
+<p><strong>A fifth function, <code>collect</code>, is <code>[type.comb.set]</code>'s</strong> (sc50, wolf-lang <code>4c046f15</code>): the one combinator whose receiver is a range, and the one here that reads no accessor. It walks <code>for x in r</code>, so lupin 0.1.36, which resolves lazily, runs it over <code>range[int]</code> and declines <code>range[char]</code> itself (&quot;a range needs integer endpoints&quot;). Its int example is fenced for that reason.</p>
+<p><code>rev()</code> and <code>step_by()</code> remain BLOCKED on the iterator combinator surface (F-0008's successor); the combinator that truncates a sequence is named <code>limit(n)</code>, never <code>take(n)</code> — <code>take</code> is the ownership mode that CONSUMES its operand, and a combinator that does not consume would be a false friend at the centre of the ownership story (wolf-lang#16, API-CONVENTIONS §10).</p>
+<h2>Items</h2>
+<table>
+<tr><td><a href="#item.clamp_to"><code>clamp_to</code></a></td><td>The value of <code>r</code> nearest to <code>x</code>: <code>x</code> itself when <code>r</code> contains it, <code>r.start</code> when <code>x</code> lies below, and <code>r.end - 1</code> — the last value yielded — when <code>x</code> is at or above <code>end</code>.</td></tr>
+<tr><td><a href="#item.collect"><code>collect</code></a></td><td>A fresh list holding every value <code>r</code> yields, in iteration order: the values a <code>for x in r</code> would see.</td></tr>
+<tr><td><a href="#item.contains"><code>contains</code></a></td><td>True when <code>x</code> is a value <code>r</code> yields: <code>r.start &lt;= x &amp;&amp; x &lt; r.end</code>, the spelling <code>[type.range.accessor]</code> gives.</td></tr>
+<tr><td><a href="#item.is_empty"><code>is_empty</code></a></td><td>True when <code>r</code> yields no values — <code>5..5</code> and <code>7..3</code> are empty, <code>2..7</code> is not.</td></tr>
+<tr><td><a href="#item.len"><code>len</code></a></td><td>The number of values <code>r</code> yields: <code>r.end - r.start</code> when <code>r</code> is non-empty, <code>0</code> when it is not — <code>len(7..3)</code> is 0 where the raw difference is -4 (module header), and <code>len(a..=b)</code> is <code>b - a + 1</code> because <code>end</code> normalized to <code>b + 1</code> at construction.</td></tr>
+</table>
+<div class="item">
+<h3 id="item.clamp_to"><code>clamp_to</code><span class="tag">fn</span><span class="tag">pub</span></h3>
+<code class="sig">fn clamp_to(r: prelude.range[int], x: int) -&gt; int ! {none} · regions (ρ1, -) -&gt; -</code>
+<p>The value of <code>r</code> nearest to <code>x</code>: <code>x</code> itself when <code>r</code> contains it, <code>r.start</code> when <code>x</code> lies below, and <code>r.end - 1</code> — the last value yielded — when <code>x</code> is at or above <code>end</code>. Rows: <code>none</code> when <code>r</code> is empty, because an empty range has no member to answer with (§2). Never traps: <code>r.end - 1</code> is computed only under <code>r.start &lt; r.end</code>, so it cannot underflow.</p>
+<p>An empty range answers with the row, handled here with <code>else</code>:</p>
+<p class="meta">doctest<span class="tag">wolf-doc-example example, run by its own rig</span></p>
+<pre class="doctest"><code>(range.clamp_to(2..7, 4) else 0 - 1) == 4
+(range.clamp_to(2..7, 9) else 0 - 1) == 6
+(range.clamp_to(2..7, 0 - 3) else 0 - 1) == 2
+(range.clamp_to(5..5, 1) else 0 - 1) == 0 - 1</code></pre>
+</div>
+<div class="item">
+<h3 id="item.collect"><code>collect</code><span class="tag">fn</span><span class="tag">pub</span></h3>
+<code class="sig">fn collect[T](r: prelude.range[T]) -&gt; prelude.List[T] · regions (ρ1) -&gt; ρ_caller</code>
+<p>A fresh list holding every value <code>r</code> yields, in iteration order: the values a <code>for x in r</code> would see. <code>2..5</code> collects <code>2, 3, 4</code>; an empty or reversed range collects the empty list. One generic function for both element types the clause names (<code>range[int]</code>, <code>range[char]</code>), because wolf has no overloading and a <code>range[int]</code> signature refuses a char range with <code>E0401</code> (measured). Total: no error row; traps as the range's <code>for</code> does (<code>[mem.iter.range]</code>), and allocation. A <code>0..9223372036854775807</code> collect is a list of that length, which no host has, so no test here builds one.</p>
+<p><code>[type.comb.set]</code> (wolf-lang <code>4c046f15</code>): the method <code>r.collect()</code> is this call (<code>std.range</code> is <code>range</code>'s home module, <code>[type.method.home]</code>). Cost, as the clause states it: one fresh <code>List</code> of the range's length, plus <code>push</code>'s own copy per value.</p>
+<p><code>r</code> is a <code>read</code> parameter and the values escape in the returned list (<code>[mem.tier0.mode.read]</code>, wolf-lang#366, in 0.2.15), and that clause counts a TYPE PARAMETER as able to reach shared storage always, &quot;because a generic body is checked once for every instantiation&quot; — so <code>T</code> is in scope for the rule even though the two element types a range can have are scalars. No <code>copy</code> is spelled: the store is <code>push</code>'s, wolf-lang#385 ruled option 3 (s167, unreleased) copies a non-<code>Copy</code> element by default, and a value that reaches no heap storage is its own copy, so this costs nothing at run time either way (<code>[mem.tier0.move.3]</code>, wolf-lang#384). <code>take</code> is not the spelling here: a value moved out of a <code>read</code> parameter is LENT, and a <code>take</code> of a lent binding is E1014 by the same clause.</p>
+<p class="meta">doctest<span class="tag">wolf-doc-example example, run by its own rig</span></p>
+<pre class="doctest"><code>range.collect(2..5).len == 3
+range.collect(2..5)[0] == 2
+range.collect(1..=3)[2] == 3
+range.collect(7..3).len == 0</code></pre>
+</div>
+<div class="item">
+<h3 id="item.contains"><code>contains</code><span class="tag">fn</span><span class="tag">pub</span></h3>
+<code class="sig">fn contains(r: prelude.range[int], x: int) -&gt; bool · regions (ρ1, -) -&gt; -</code>
+<p>True when <code>x</code> is a value <code>r</code> yields: <code>r.start &lt;= x &amp;&amp; x &lt; r.end</code>, the spelling <code>[type.range.accessor]</code> gives. O(1) on every input, <code>0..9223372036854775807</code> included — the range this function refused to be written over by iteration. An empty range contains nothing. Total: no error row, no traps.</p>
+<p><code>end</code> is exclusive, so <code>7</code> is outside <code>2..7</code> and inside <code>2..=7</code>:</p>
+<p class="meta">doctest<span class="tag">wolf-doc-example example, run by its own rig</span></p>
+<pre class="doctest"><code>range.contains(2..7, 2) == true
+range.contains(2..7, 7) == false
+range.contains(2..=7, 7) == true</code></pre>
+</div>
+<div class="item">
+<h3 id="item.is_empty"><code>is_empty</code><span class="tag">fn</span><span class="tag">pub</span></h3>
+<code class="sig">fn is_empty(r: prelude.range[int]) -&gt; bool · regions (ρ1) -&gt; -</code>
+<p>True when <code>r</code> yields no values — <code>5..5</code> and <code>7..3</code> are empty, <code>2..7</code> is not. One comparison, <code>r.start &gt;= r.end</code>; the body before 0.2.14 asked the iterator the same question (<code>for _ in r { return false }</code>), which was O(1) too and is why this function shipped eleven sprints before the other three. Total: no error row, no traps.</p>
+<p class="meta">doctest<span class="tag">wolf-doc-example example, run by its own rig</span></p>
+<pre class="doctest"><code>range.is_empty(5..5) == true
+range.is_empty(7..3) == true
+range.is_empty(2..7) == false</code></pre>
+</div>
+<div class="item">
+<h3 id="item.len"><code>len</code><span class="tag">fn</span><span class="tag">pub</span></h3>
+<code class="sig">fn len(r: prelude.range[int]) -&gt; int · regions (ρ1) -&gt; -</code>
+<p>The number of values <code>r</code> yields: <code>r.end - r.start</code> when <code>r</code> is non-empty, <code>0</code> when it is not — <code>len(7..3)</code> is 0 where the raw difference is -4 (module header), and <code>len(a..=b)</code> is <code>b - a + 1</code> because <code>end</code> normalized to <code>b + 1</code> at construction. No error row. Traps <code>overflow</code> (checked arithmetic, X3) when the count does not fit an <code>int</code>, which is exactly a range spanning more than half the integer line — <code>(0 - 9223372036854775807 - 1)..9223372036854775807</code> yields 2^64 - 1 values and there is no <code>int</code> to say so; <code>tests/range/len_overflow_trap.lu</code> pins the kind.</p>
+<p class="meta">doctest<span class="tag">wolf-doc-example example, run by its own rig</span></p>
+<pre class="doctest"><code>range.len(2..7) == 5
+range.len(2..=7) == 6
+range.len(5..5) == 0
+range.len(7..3) == 0</code></pre>
+</div>
+<footer class="meta">Generated by <code>wolf doc</code> from doc comments and the compiler&rsquo;s own signatures. Every signature on this page is the one the compiler resolved; no part of it was re-parsed from source.</footer>
+</body>
+</html>
