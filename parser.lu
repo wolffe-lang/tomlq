@@ -313,7 +313,7 @@ fn or_resolve_array_for_path(mut p: Parser, segments: List[str]) -> int ! {
     while i < n - 1 {
         let segment = segments[i]
         may_define(p, current, segment, 1)?
-        current = or_resolve_segment(mut p, current, segment)?
+        current = or_resolve_for_header(mut p, current, segment)?
         i = i + 1
     }
     // Last segment: find or create an array of tables
@@ -659,10 +659,6 @@ fn may_define(p: Parser, parent: int, key: str, how: int) -> () ! {ParseError(in
         }
         // how 5 (key=value) into a table is refused
         if how == 5 {
-            return ParseError(p.c.line, p.c.col, "key already defined")
-        }
-        // how 1 (dotted descent) and kid.defined_by == 5 and different block → refuse
-        if how == 1 && node_defined_by(p.arena, kid) == 5 && node_block(p.arena, kid) != p.block {
             return ParseError(p.c.line, p.c.col, "key already defined")
         }
         return
