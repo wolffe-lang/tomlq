@@ -265,73 +265,85 @@ fn code_point_to_str(cp: int) -> str {
 
 /// Parse a basic string (double-quoted). Returns the decoded string or raises an error.
 fn parse_basic_string(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
-    // Opening quote already consumed
+    // Opening quote already consumed. Scan for runs without escapes,
+    // appending each run as one slice.
     var result = ""
     while !cursor_at_end(c) {
-        let ch = cursor_peek(c)
-        if ch == "\"" {
-            cursor_advance(mut c)
-            return result
-        }
-        if ch == "\\" {
-            cursor_advance(mut c)
-            let esc = cursor_peek(c)
-            if esc == "" {
-                return ParseError(c.line, c.col, "unexpected end of string after \\")
+        // Find the next " or \
+        var run_start = c.pos
+        var i = c.pos
+        while i < c.s.len {
+            let ch = c.s.get(i..i + 1) else ""
+            if ch == "\"" || ch == "\\" {
+                break
             }
-            cursor_advance(mut c)
-            if esc == "b" {
-                result = result + "\x08"
-            } else if esc == "t" {
-                result = result + "\t"
-            } else if esc == "n" {
-                result = result + "\n"
-            } else if esc == "f" {
-                result = result + "\x0C"
-            } else if esc == "r" {
-                result = result + "\r"
-            } else if esc == "\"" {
-                result = result + "\""
-            } else if esc == "\\" {
-                result = result + "\\"
-            } else if esc == "e" {
-                result = result + "\x1B"
-            } else if esc == "u" {
-                let val = parse_hex_n(mut c, 4)
-                if val < 0 {
-                    return ParseError(c.line, c.col, "invalid \\u escape")
-                }
-                // Check for surrogate code points (U+D800..U+DFFF)
-                if val >= 0xD800 && val <= 0xDFFF {
-                    return ParseError(c.line, c.col, "surrogate code point in \\u escape")
-                }
-                if val > 0x10FFFF {
-                    return ParseError(c.line, c.col, "unicode code point out of range")
-                }
-                result = result + code_point_to_str(val)
-            } else if esc == "U" {
-                let val = parse_hex_n(mut c, 8)
-                if val < 0 {
-                    return ParseError(c.line, c.col, "invalid \\U escape")
-                }
-                // Check for surrogate code points
-                if val >= 0xD800 && val <= 0xDFFF {
-                    return ParseError(c.line, c.col, "surrogate code point in \\U escape")
-                }
-                if val > 0x10FFFF {
-                    return ParseError(c.line, c.col, "unicode code point out of range")
-                }
-                result = result + code_point_to_str(val)
-            } else {
-                return ParseError(c.line, c.col, "invalid escape \\{esc}")
-            }
-        } else {
-            // Check for control characters (0x00..0x1F except tab)
+            // Check for control characters
             if is_control(ch) {
                 return ParseError(c.line, c.col, "control character in string")
             }
-            result = result + ch
-            cursor_advance(mut c)
+            i = i + 1
+        }
+        // Append the run as one slice
+        if i > run_start {
+            result = result + (c.s.get(run_start..i) else "")
+        }
+        if i >= c.s.len {
+            return ParseError(c.line, c.col, "unexpected end of input in string")
+        }
+        let ch = c.s.get(i..i + 1) else ""
+        if ch == "\"" {
+            c.pos = i + 1
+            return result
+        }
+        // ch == "\\"
+        c.pos = i + 1
+        let esc = cursor_peek(c)
+        if esc == "" {
+            return ParseError(c.line, c.col, "unexpected end of string after \\")
+        }
+        cursor_advance(mut c)
+        if esc == "b" {
+            result = result + "\x08"
+        } else if esc == "t" {
+            result = result + "\t"
+        } else if esc == "n" {
+            result = result + "\n"
+        } else if esc == "f" {
+            result = result + "\x0C"
+        } else if esc == "r" {
+            result = result + "\r"
+        } else if esc == "\"" {
+            result = result + "\""
+        } else if esc == "\\" {
+            result = result + "\\"
+        } else if esc == "e" {
+            result = result + "\x1B"
+        } else if esc == "u" {
+            let val = parse_hex_n(mut c, 4)
+            if val < 0 {
+                return ParseError(c.line, c.col, "invalid \\u escape")
+            }
+            if val >= 0xD800 && val <= 0xDFFF {
+                return ParseError(c.line, c.col, "surrogate code point in \\u escape")
+            }
+            if val > 0x10FFFF {
+                return ParseError(c.line, c.col, "unicode code point out of range")
+            }
+            result = result + code_point_to_str(val)
+        } else if esc == "U" {
+            let val = parse_hex_n(mut c, 8)
+            if val < 0 {
+                return ParseError(c.line, c.col, "invalid \\U escape")
+            }
+            if val >= 0xD800 && val <= 0xDFFF {
+                return ParseError(c.line, c.col, "surrogate code point in \\U escape")
+            }
+            if val > 0x10FFFF {
+                return ParseError(c.line, c.col, "unicode code point out of range")
+            }
+            result = result + code_point_to_str(val)
+        } else {
+            return ParseError(c.line, c.col, "invalid escape \\{esc}")
         }
     }
     return ParseError(c.line, c.col, "unexpected end of input in string")
@@ -339,26 +351,36 @@ fn parse_basic_string(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
 
 /// Parse a literal string (single-quoted). Returns the decoded string or raises an error.
 fn parse_literal_string(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
-    // Opening quote already consumed
+    // Opening quote already consumed. Scan for runs without ' or \ or ",
+    // appending each run as one slice.
     var result = ""
     while !cursor_at_end(c) {
-        let ch = cursor_peek(c)
-        if ch == "'" {
-            cursor_advance(mut c)
-            return result
-        }
-        if ch == "\\" || ch == "\"" {
-            // These are just literal characters in a literal string
-            result = result + ch
-            cursor_advance(mut c)
-        } else {
-            // Check for control characters and newlines
+        var run_start = c.pos
+        var i = c.pos
+        while i < c.s.len {
+            let ch = c.s.get(i..i + 1) else ""
+            if ch == "'" || ch == "\\" || ch == "\"" {
+                break
+            }
             if is_control(ch) || ch == "\n" {
                 return ParseError(c.line, c.col, "control character in literal string")
             }
-            result = result + ch
-            cursor_advance(mut c)
+            i = i + 1
         }
+        if i > run_start {
+            result = result + (c.s.get(run_start..i) else "")
+        }
+        if i >= c.s.len {
+            return ParseError(c.line, c.col, "unexpected end of input in literal string")
+        }
+        let ch = c.s.get(i..i + 1) else ""
+        if ch == "'" {
+            c.pos = i + 1
+            return result
+        }
+        // \ and " are literal in literal strings
+        result = result + ch
+        c.pos = i + 1
     }
     return ParseError(c.line, c.col, "unexpected end of input in literal string")
 }
@@ -380,43 +402,77 @@ fn count_quotes(mut c: Cursor, q: str) -> int {
 
 /// Parse a multi-line basic string ("""). Returns the decoded string or raises an error.
 fn parse_multiline_basic_string(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
-    // Opening """ already consumed
+    // Opening """ already consumed. Scan for runs without " or \,
+    // appending each run as one slice.
     var result = ""
     var after_open = true
     while !cursor_at_end(c) {
+        // Scan for a run without " or \
+        var run_start = c.pos
+        var i = c.pos
+        while i < c.s.len {
+            let ch = c.s.get(i..i + 1) else ""
+            if ch == "\"" || ch == "\\" {
+                break
+            }
+            if is_control(ch) && ch != "\n" && ch != "\r" {
+                return ParseError(c.line, c.col, "control character in string")
+            }
+            if ch == "\r" {
+                let next = c.s.get(i + 1..i + 2) else ""
+                if next != "\n" {
+                    return ParseError(c.line, c.col, "bare CR in string")
+                }
+            }
+            i = i + 1
+        }
+        if i > run_start {
+            // Handle the newline immediately after opening """
+            if after_open {
+                // Check if the run starts with \n or \r\n
+                if (c.s.get(run_start..run_start + 1) else "") == "\n" {
+                    c.pos = run_start + 1
+                    after_open = false
+                    continue
+                } else if (c.s.get(run_start..run_start + 1) else "") == "\r" {
+                    c.pos = run_start + 1
+                    if c.pos < c.s.len && (c.s.get(c.pos..c.pos + 1) else "") == "\n" {
+                        c.pos = c.pos + 1
+                    }
+                    after_open = false
+                    continue
+                }
+                after_open = false
+            }
+            result = result + (c.s.get(run_start..i) else "")
+        }
+        if i >= c.s.len {
+            return ParseError(c.line, c.col, "unexpected end of input in multi-line string")
+        }
         // Check for closing """
-        let rest = c.s.get(c.pos..) else ""
-        if rest.starts_with("\"\"\"") {
-            // Count the whole run of quotes
+        if (c.s.get(i..i + 3) else "") == "\"\"\"" {
             var temp = copy c
+            temp.pos = i
             let n = count_quotes(mut temp, "\"")
             if n == 3 {
-                // Exactly 3 quotes: close the string
-                cursor_advance(mut c)
-                cursor_advance(mut c)
-                cursor_advance(mut c)
+                c.pos = i + 3
                 return result
             } else if n == 4 || n == 5 {
-                // 4 or 5 quotes: first n-3 are content, last 3 close
-                var i = 0
-                while i < n - 3 {
+                var j = 0
+                while j < n - 3 {
                     result = result + "\""
-                    cursor_advance(mut c)
-                    i = i + 1
+                    j = j + 1
                 }
-                cursor_advance(mut c)
-                cursor_advance(mut c)
-                cursor_advance(mut c)
+                c.pos = i + n
                 return result
             } else {
-                // More than 5 quotes: invalid
                 return ParseError(c.line, c.col, "too many closing quotes in multi-line string")
             }
         }
-        let ch = cursor_peek(c)
+        let ch = c.s.get(i..i + 1) else ""
         if ch == "\\" {
             after_open = false
-            cursor_advance(mut c)
+            c.pos = i + 1
             let esc = cursor_peek(c)
             if esc == "" {
                 return ParseError(c.line, c.col, "unexpected end of string after \\")
@@ -463,9 +519,6 @@ fn parse_multiline_basic_string(mut c: Cursor) -> str ! {ParseError(int, int, st
                 }
                 result = result + code_point_to_str(val)
             } else if esc == "\n" || esc == "\r" || esc == " " || esc == "\t" {
-                // A line-ending backslash: only spaces and tabs may follow it on
-                // its line, and it trims that newline and every space, tab and
-                // newline after it, up to the next other character.
                 var newline = esc == "\n" || esc == "\r"
                 while !cursor_at_end(c) {
                     let ws = cursor_peek(c)
@@ -484,42 +537,11 @@ fn parse_multiline_basic_string(mut c: Cursor) -> str ! {ParseError(int, int, st
             } else {
                 return ParseError(c.line, c.col, "invalid escape \\{esc}")
             }
-        } else if ch == "\"" {
-            after_open = false
-            // A lone " or "" inside """ is just content
-            result = result + ch
-            cursor_advance(mut c)
         } else {
-            // Check for control characters (0x00..0x1F except tab and newline)
-            if is_control(ch) && ch != "\n" && ch != "\r" {
-                return ParseError(c.line, c.col, "control character in string")
-            }
-            // Check for bare CR (CR not followed by LF)
-            if ch == "\r" {
-                let next = c.s.get(c.pos + 1..c.pos + 2) else ""
-                if next != "\n" {
-                    return ParseError(c.line, c.col, "bare CR in string")
-                }
-            }
-            // Handle the newline immediately after opening """
-            if after_open {
-                if ch == "\n" {
-                    cursor_advance(mut c)
-                    after_open = false
-                    continue
-                } else if ch == "\r" {
-                    cursor_advance(mut c)
-                    let next = cursor_peek(c)
-                    if next == "\n" {
-                        cursor_advance(mut c)
-                    }
-                    after_open = false
-                    continue
-                }
-                after_open = false
-            }
+            // ch == "\"" — a lone " inside """ is just content
+            after_open = false
             result = result + ch
-            cursor_advance(mut c)
+            c.pos = i + 1
         }
     }
     return ParseError(c.line, c.col, "unexpected end of input in multi-line string")
@@ -527,76 +549,73 @@ fn parse_multiline_basic_string(mut c: Cursor) -> str ! {ParseError(int, int, st
 
 /// Parse a multi-line literal string ('''). Returns the decoded string or raises an error.
 fn parse_multiline_literal_string(mut c: Cursor) -> str ! {ParseError(int, int, str)} {
-    // Opening ''' already consumed
+    // Opening ''' already consumed. Scan for runs without ', appending as slices.
     var result = ""
     var after_open = true
     while !cursor_at_end(c) {
-        // Check for closing '''
-        let rest = c.s.get(c.pos..) else ""
-        if rest.starts_with("'''") {
-            // Count the whole run of quotes
-            var temp = copy c
-            let n = count_quotes(mut temp, "'")
-            if n == 3 {
-                // Exactly 3 quotes: close the string
-                cursor_advance(mut c)
-                cursor_advance(mut c)
-                cursor_advance(mut c)
-                return result
-            } else if n == 4 || n == 5 {
-                // 4 or 5 quotes: first n-3 are content, last 3 close
-                var i = 0
-                while i < n - 3 {
-                    result = result + "'"
-                    cursor_advance(mut c)
-                    i = i + 1
-                }
-                cursor_advance(mut c)
-                cursor_advance(mut c)
-                cursor_advance(mut c)
-                return result
-            } else {
-                // More than 5 quotes: invalid
-                return ParseError(c.line, c.col, "too many closing quotes in multi-line string")
+        // Scan for a run without '
+        var run_start = c.pos
+        var i = c.pos
+        while i < c.s.len {
+            let ch = c.s.get(i..i + 1) else ""
+            if ch == "'" {
+                break
             }
-        }
-        let ch = cursor_peek(c)
-        if ch == "'" {
-            // A lone ' or '' inside ''' is just content
-            result = result + ch
-            cursor_advance(mut c)
-        } else {
-            // Check for control characters (0x00..0x1F except tab and newline)
             if is_control(ch) && ch != "\n" && ch != "\r" {
                 return ParseError(c.line, c.col, "control character in literal string")
             }
-            // Check for bare CR (CR not followed by LF)
             if ch == "\r" {
-                let next = c.s.get(c.pos + 1..c.pos + 2) else ""
+                let next = c.s.get(i + 1..i + 2) else ""
                 if next != "\n" {
                     return ParseError(c.line, c.col, "bare CR in literal string")
                 }
             }
-            // Handle the newline immediately after opening '''
+            i = i + 1
+        }
+        if i > run_start {
             if after_open {
-                if ch == "\n" {
-                    cursor_advance(mut c)
+                if (c.s.get(run_start..run_start + 1) else "") == "\n" {
+                    c.pos = run_start + 1
                     after_open = false
                     continue
-                } else if ch == "\r" {
-                    cursor_advance(mut c)
-                    let next = cursor_peek(c)
-                    if next == "\n" {
-                        cursor_advance(mut c)
+                } else if (c.s.get(run_start..run_start + 1) else "") == "\r" {
+                    c.pos = run_start + 1
+                    if c.pos < c.s.len && (c.s.get(c.pos..c.pos + 1) else "") == "\n" {
+                        c.pos = c.pos + 1
                     }
                     after_open = false
                     continue
                 }
                 after_open = false
             }
-            result = result + ch
-            cursor_advance(mut c)
+            result = result + (c.s.get(run_start..i) else "")
         }
+        if i >= c.s.len {
+            return ParseError(c.line, c.col, "unexpected end of input in multi-line literal string")
+        }
+        // Check for closing '''
+        if (c.s.get(i..i + 3) else "") == "'''" {
+            var temp = copy c
+            temp.pos = i
+            let n = count_quotes(mut temp, "'")
+            if n == 3 {
+                c.pos = i + 3
+                return result
+            } else if n == 4 || n == 5 {
+                var j = 0
+                while j < n - 3 {
+                    result = result + "'"
+                    j = j + 1
+                }
+                c.pos = i + n
+                return result
+            } else {
+                return ParseError(c.line, c.col, "too many closing quotes in multi-line string")
+            }
+        }
+        // ch == "'" — a lone ' inside ''' is just content
+        result = result + "'"
+        c.pos = i + 1
     }
     return ParseError(c.line, c.col, "unexpected end of input in multi-line literal string")
 }
