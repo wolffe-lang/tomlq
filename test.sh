@@ -25,7 +25,7 @@ row K2 0 '1' '' "printf 'a.\"b c\".d = 1\n' | ./tomlq '.a.\"b c\".d' -"
 printf 'a.b = 1\n[c]\nd = "x"\n' > .c2.toml
 row C2a 0 'x' '' "./tomlq .c.d .c2.toml"
 row C2b 0 '1' '' "./tomlq .a.b .c2.toml"
-row C2c 1 '' '' "./tomlq .nope .c2.toml"
+row C2c 1 '' 'tomlq: .nope: not found' "./tomlq .nope .c2.toml"
 printf '[[s]]\nh="a"\n[[s]]\nh="b"\n' > .c3.toml
 row C3a 0 'b' '' "./tomlq '.s[1].h' .c3.toml"
 row C3b 0 '2' '' "./tomlq --len .s .c3.toml"
@@ -97,11 +97,12 @@ python3 -c "print('s = \"' + 'x'*400000 + '\"')" > .l1.toml
 l1=$(bash tools/memrun.sh 512 5 ./tomlq --json .l1.toml 2>&1 > .l1.json | tail -n 1)
 if echo "$l1" | grep -q 'rc=0 '; then pass "L1    400 KB string: $l1"
 else fail "L1    400 KB string failed" "got: $l1"; fi
-rm -f .l1.toml .l1.json
+rm -f .l1.json
 # L2: named path failure
 row L2 1 '' 'tomlq: nope: not found' "./tomlq nope .l1.toml"
 # L3: one operand
 row L3 2 '' 'tomlq: unexpected operand: .l1.toml' "./tomlq --json - .l1.toml < /dev/null"
+rm -f .l1.toml
 # L4: BOM
 row L4 0 '{"a":1}' '' "printf '\xef\xbb\xbfa = 1\n' | ./tomlq --json -"
 # L5: path into a scalar
