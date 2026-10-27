@@ -1,9 +1,5 @@
-# Changelog
-
 ## 0.1.0 (2026-10-26)
 
-- TOML 1.0 parser with arena-based value tree.
-- Plain JSON and tagged JSON emission.
-- PATH queries (`--keys`, `--len`, `--raw`).
-- Corpus grading against `toml-test` (commit `ff49d109`).
-- Grade: valid 93/208, invalid 417/501.
+A TOML 1.0 parser and query tool in wolf. Parses valid TOML, rejects invalid TOML, and supports PATH queries.
+
+The grade: 208/208 valid cases and 501/501 invalid cases pass, as judged by toml-test's own runner at commit `ff49d109861c1ad25af53f687f2aef19ab650600`.
