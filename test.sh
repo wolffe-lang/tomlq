@@ -42,7 +42,7 @@ row I4 0 '2' '' "printf 'a = \"\xff\"\n' | ./tomlq --json - >/dev/null 2>&1; ech
 row E1 2 '' 'usage: tomlq [--json | --tagged] FILE|-' "./tomlq"
 row E2 2 '' 'tomlq: unknown option: --bogus' "./tomlq --bogus x"
 row E3 2 '' 'tomlq: /nonexistent: no such file' "./tomlq --json /nonexistent"
-row V1 0 'tomlq 0.1.0 (built with wolf 0.2.34)' '' "./tomlq --version"
+row V1 0 'tomlq 0.1.1 (built with wolf 0.2.34)' '' "./tomlq --version"
 rm -f .c2.toml .c3.toml
 
 # test.sh, part 2 — the corpus (toml-test's own runner is the grader), stdin = file, JSON validity, P1.

@@ -1,7 +1,7 @@
 > **Built by wollf.** This program was written by [wollf-v7sf3](https://huggingface.co/wolffe-lang/wollf-v7sf3),
 > a 27B model trained to write wolf, driven through opencode by the prompts in `prompts/`, with a human
 > reviewer judging each phase and writing the next. Every claim below is pasted from the binary; the test
-> script is the reason to trust it.
+> script is the reason to trust it. The README is the specification the build followed.
 
 # tomlq
 
@@ -71,11 +71,11 @@ $ printf '[b]\nc = 2\nd = 3\n' | ./tomlq --len b -
 2
 ```
 
-Read from stdin (`-`):
+Index into an array of tables:
 
 ```
-$ echo 'a = 1' | ./tomlq --json -
-{"a":1}
+$ printf '[[s]]\nn = 1\n[[s]]\nn = 2\n' | ./tomlq 's[1].n' -
+2
 ```
 
 A parse error (exit 2):
@@ -108,7 +108,9 @@ bash tools/fetch-corpus.sh
 
 ## Plain JSON
 
-Keys in document order. `inf`, `-inf`, `nan` as strings. Floats always have a `.` or an exponent. Date-times as their text.
+Keys in document order. `inf`, `-inf`, `nan` as strings. Floats always have a `.` or an exponent. Date-times normalised: a space between date and time becomes `T`.
+
+`--raw` prints a scalar bare (the default for a PATH query; kept for scripts). `--only SUBDIR` runs one corpus subtree. `--spec-verbose` prints each failing case's first differing path and both values.
 
 ## Known limits
 
@@ -150,6 +152,5 @@ macOS Sonoma, Apple M-series.
 | `LICENSE` | Apache-2.0 |
 | `README.md` | This document |
 | `CHANGELOG.md` | Release notes |
-| `SPEC.md` | The specification this was built from |
 
 Licensed under the Apache License 2.0 (`LICENSE`).

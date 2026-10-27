@@ -540,7 +540,7 @@ fn main() -> !int {
         return usage_err()
     }
     if args[0] == "--version" {
-        print("tomlq 0.1.0 (built with wolf 0.2.34)")
+        print("tomlq 0.1.1 (built with wolf 0.2.34)")
         return 0
     }
     if args[0] == "--help" {
