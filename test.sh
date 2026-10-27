@@ -92,6 +92,22 @@ s=$(echo "$p2" | sed -n 's/.*secs=\([0-9.]*\).*/\1/p')
 if echo "$p2" | grep -q 'rc=0 ' && python3 -c "import sys; sys.exit(0 if float('$s') < 2 else 1)"; then pass "P2    140000 keys in 1400 tables: $p2"
 else fail "P2    want rc=0, secs < 2, under 2048 MB" "got: $p2"; fi
 rm -f .p2.toml
+# L1: 400 KB string parses under 5 seconds
+python3 -c "print('s = \"' + 'x'*400000 + '\"')" > .l1.toml
+l1=$(bash tools/memrun.sh 512 5 ./tomlq --json .l1.toml 2>&1 > .l1.json | tail -n 1)
+if echo "$l1" | grep -q 'rc=0 '; then pass "L1    400 KB string: $l1"
+else fail "L1    400 KB string failed" "got: $l1"; fi
+rm -f .l1.toml .l1.json
+# L2: named path failure
+row L2 1 '' 'tomlq: nope: not found' "./tomlq nope .l1.toml"
+# L3: one operand
+row L3 2 '' 'tomlq: unexpected operand: .l1.toml' "./tomlq --json - .l1.toml < /dev/null"
+# L4: BOM
+row L4 0 '{"a":1}' '' "printf '\xef\xbb\xbfa = 1\n' | ./tomlq --json -"
+# L5: path into a scalar
+printf 'a = 1\n' > .l5.toml
+row L5 1 '' 'tomlq: a.b: not a table' "./tomlq a.b .l5.toml"
+rm -f .l5.toml
 echo
 [ $fails -eq 0 ] && { echo "All rows passed."; exit 0; }
 echo "$fails rows failed."; exit 1
