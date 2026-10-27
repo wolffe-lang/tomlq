@@ -556,9 +556,14 @@ fn parse_key_value(mut p: Parser) -> int ! {ParseError(int, int, str)} {
 
 /// Add a key for a list of segments, descending through intermediate tables.
 /// Where a segment names an array of tables, resolve into its last element.
-fn add_key_for_segments(mut p: Parser, parent: int, segments: List[str], value_node: int, key_line: int, key_col: int) -> () ! {
-    ParseError(int, int, str),
-} {
+fn add_key_for_segments(
+    mut p: Parser,
+    parent: int,
+    segments: List[str],
+    value_node: int,
+    key_line: int,
+    key_col: int,
+) -> () ! {ParseError(int, int, str)} {
     let n = segments.len
     if n == 0 {
         return ParseError(key_line, key_col, "empty key")
@@ -692,7 +697,9 @@ fn may_define(p: Parser, parent: int, key: str, how: int) -> () ! {ParseError(in
 }
 
 /// Like may_define but with an explicit position.
-fn may_define_at(p: Parser, parent: int, key: str, how: int, line: int, col: int) -> () ! {ParseError(int, int, str)} {
+fn may_define_at(p: Parser, parent: int, key: str, how: int, line: int, col: int) -> () ! {
+    ParseError(int, int, str),
+} {
     let kid = find_child(p.arena, parent, key) else -1
     if kid < 0 {
         return
