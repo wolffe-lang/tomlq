@@ -82,10 +82,19 @@ fn parse_header(mut p: Parser) -> Header ! {ParseError(int, int, str)} {
     }
     cursor_advance(mut p.c)
     let ch2 = cursor_peek(p.c)
+    // Check for newline after [ (unterminated table header)
+    if ch2 == "\n" || ch2 == "\r" {
+        return ParseError(p.c.line, p.c.col, "unterminated table header")
+    }
     if ch2 == "[" {
         cursor_advance(mut p.c)
+        // Check for newline after [[
+        let ch3 = cursor_peek(p.c)
+        if ch3 == "\n" || ch3 == "\r" {
+            return ParseError(p.c.line, p.c.col, "unterminated table header")
+        }
         let segments = parse_key(mut p)?
-        cursor_skip_ws_comment(mut p.c)?
+        cursor_skip_spaces_comment(mut p.c)?
         let ch3 = cursor_peek(p.c)
         if ch3 != "]" {
             return ParseError(p.c.line, p.c.col, "expected ]")
@@ -106,8 +115,13 @@ fn parse_header(mut p: Parser) -> Header ! {ParseError(int, int, str)} {
         add_child(mut p.arena, arr_node, new_table)
         return Header { kind: 2, node: new_table }
     } else {
+        // Check for newline after [
+        let ch3 = cursor_peek(p.c)
+        if ch3 == "\n" || ch3 == "\r" {
+            return ParseError(p.c.line, p.c.col, "unterminated table header")
+        }
         let segments = parse_key(mut p)?
-        cursor_skip_ws_comment(mut p.c)?
+        cursor_skip_spaces_comment(mut p.c)?
         let ch3 = cursor_peek(p.c)
         if ch3 != "]" {
             return ParseError(p.c.line, p.c.col, "expected ]")
@@ -343,7 +357,7 @@ fn or_resolve_segment(mut p: Parser, parent: int, key: str) -> int ! {ParseError
 
 /// Parse a key (bare or quoted, possibly dotted). Returns the segments as a list.
 fn parse_key(mut p: Parser) -> List[str] ! {ParseError(int, int, str)} {
-    cursor_skip_ws_comment(mut p.c)?
+    cursor_skip_spaces_comment(mut p.c)?
     let ch = cursor_peek(p.c)
     var result = List[str]()
     if ch == "\"" {
