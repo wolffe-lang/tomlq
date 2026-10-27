@@ -240,7 +240,7 @@ fn emit_tagged_array(mut b: Sink, arena: List[Node], i: int) -> () ! {ParseError
 
 fn emit_main() -> !int ! {ParseError(int, int, str)} {
     var arena = List[Node]()
-    let root = table_node(mut arena, 0)
+    let root = table_node(mut arena, 0, 0)
     let s = string_node(mut arena, "hello")
     add_key(mut arena, root, "key", s)
     let j = emit_json(arena, root)?

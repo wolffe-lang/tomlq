@@ -2,9 +2,10 @@
 
 /// Arena node. kind: 0 table, 1 array, 2 string, 3 integer, 4 float, 5 bool,
 /// 6 datetime, 7 datetime-local, 8 date-local, 9 time-local.
-/// defined_by: 0 root; 1 implicit (header path or dotted key); 2 inline table;
-/// 3 explicit [header]; 4 array-of-tables element.
-/// closed: true when the table may not be extended by later headers.
+/// defined_by: 0 root; 1 implicit (header path); 2 value array; 3 explicit [header];
+/// 4 array-of-tables element; 5 dotted key.
+/// closed: true when the table may not be extended (inline tables).
+/// block: the header block number when this node was created (0 for root).
 struct Node {
     kind: int,
     b: bool,
@@ -15,10 +16,11 @@ struct Node {
     keys: List[str],
     defined_by: int,
     closed: bool,
+    block: int,
 }
 
 /// Create a new table node in the arena. Returns its index.
-fn table_node(mut arena: List[Node], defined_by: int) -> int {
+fn table_node(mut arena: List[Node], defined_by: int, block: int) -> int {
     let n = Node {
         kind: 0,
         b: false,
@@ -29,6 +31,7 @@ fn table_node(mut arena: List[Node], defined_by: int) -> int {
         keys: List[str](),
         defined_by: defined_by,
         closed: false,
+        block: block,
     }
     (mut arena).push(n)
     arena.len - 1
@@ -46,6 +49,7 @@ fn array_node(mut arena: List[Node]) -> int {
         keys: List[str](),
         defined_by: 0,
         closed: false,
+        block: 0,
     }
     (mut arena).push(n)
     arena.len - 1
@@ -63,6 +67,7 @@ fn string_node(mut arena: List[Node], s: str) -> int {
         keys: List[str](),
         defined_by: 0,
         closed: false,
+        block: 0,
     }
     (mut arena).push(n)
     arena.len - 1
@@ -80,6 +85,7 @@ fn int_node(mut arena: List[Node], i: i64) -> int {
         keys: List[str](),
         defined_by: 0,
         closed: false,
+        block: 0,
     }
     (mut arena).push(n)
     arena.len - 1
@@ -97,6 +103,7 @@ fn float_node(mut arena: List[Node], f: f64) -> int {
         keys: List[str](),
         defined_by: 0,
         closed: false,
+        block: 0,
     }
     (mut arena).push(n)
     arena.len - 1
@@ -114,6 +121,7 @@ fn bool_node(mut arena: List[Node], b: bool) -> int {
         keys: List[str](),
         defined_by: 0,
         closed: false,
+        block: 0,
     }
     (mut arena).push(n)
     arena.len - 1
@@ -131,6 +139,7 @@ fn datetime_node(mut arena: List[Node], s: str, kind: int) -> int {
         keys: List[str](),
         defined_by: 0,
         closed: false,
+        block: 0,
     }
     (mut arena).push(n)
     arena.len - 1
@@ -187,6 +196,11 @@ fn node_defined_by(arena: List[Node], i: int) -> int {
     arena[i].defined_by
 }
 
+/// Get the block number of a node.
+fn node_block(arena: List[Node], i: int) -> int {
+    arena[i].block
+}
+
 /// Get the length of a node's key list without copying.
 fn node_key_len(arena: List[Node], i: int) -> int {
     arena[i].keys.len
@@ -224,8 +238,8 @@ fn close_table(mut arena: List[Node], i: int) {
 
 fn tree_main() -> !int {
     var arena = List[Node]()
-    let root = table_node(mut arena, 0)
-    let t = table_node(mut arena, 1)
+    let root = table_node(mut arena, 0, 0)
+    let t = table_node(mut arena, 1, 0)
     add_key(mut arena, root, "table", t)
     let s = string_node(mut arena, "hello")
     add_key(mut arena, t, "key", s)
