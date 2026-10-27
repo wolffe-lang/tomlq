@@ -323,7 +323,9 @@ fn or_resolve_array_for_path(mut p: Parser, segments: List[str]) -> int ! {
 
 /// Resolve a segment for a header: if it names a table, return it; if it names an array of tables,
 /// return the last element; if it does not exist, create a table with defined_by 1.
-fn or_resolve_for_header(mut p: Parser, parent: int, key: str) -> int ! {ParseError(int, int, str)} {
+fn or_resolve_for_header(mut p: Parser, parent: int, key: str) -> int ! {
+    ParseError(int, int, str),
+} {
     let nkeys = node_key_len(p.arena, parent)
     var i = 0
     while i < nkeys {
@@ -674,6 +676,12 @@ fn may_define(p: Parser, parent: int, key: str, how: int) -> () ! {ParseError(in
         }
         // how 5 (key=value) into a table is refused
         if how == 5 {
+            return ParseError(p.c.line, p.c.col, "key already defined")
+        }
+        // how 1 (dotted descent) into a table defined by 1 or 3 in a different block → refuse
+        if how == 1 &&
+            (node_defined_by(p.arena, kid) == 1 || node_defined_by(p.arena, kid) == 3) &&
+            node_block(p.arena, kid) != p.block {
             return ParseError(p.c.line, p.c.col, "key already defined")
         }
         return
