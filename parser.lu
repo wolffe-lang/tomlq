@@ -199,7 +199,7 @@ fn or_create_table_for_header(mut p: Parser, segments: List[str]) -> int ! {
     var i = 0
     while i < n - 1 {
         let segment = segments[i]
-        may_define(p, current, segment, 1)?
+        may_define(p, current, segment, 6)?
         current = or_resolve_for_header(mut p, current, segment)?
         i = i + 1
     }
@@ -312,7 +312,7 @@ fn or_resolve_array_for_path(mut p: Parser, segments: List[str]) -> int ! {
     var i = 0
     while i < n - 1 {
         let segment = segments[i]
-        may_define(p, current, segment, 1)?
+        may_define(p, current, segment, 6)?
         current = or_resolve_for_header(mut p, current, segment)?
         i = i + 1
     }
@@ -334,7 +334,12 @@ fn or_resolve_for_header(mut p: Parser, parent: int, key: str) -> int ! {ParseEr
                 return kid
             }
             if kind == 1 {
-                // It's an array — return its last element (must be a table)
+                // It's an array — check if it's an array of tables (defined_by 4) or a value array (defined_by 2)
+                let defined_by = node_defined_by(p.arena, kid)
+                if defined_by == 2 {
+                    return ParseError(p.c.line, p.c.col, "array of tables conflicts")
+                }
+                // It's an array of tables — return its last element (must be a table)
                 let nkids = node_kid_len(p.arena, kid)
                 if nkids == 0 {
                     return ParseError(p.c.line, p.c.col, "key already defined")
@@ -371,7 +376,12 @@ fn or_resolve_segment(mut p: Parser, parent: int, key: str) -> int ! {ParseError
                 return kid
             }
             if kind == 1 {
-                // It's an array — return its last element (must be a table)
+                // It's an array — check if it's an array of tables (defined_by 4) or a value array (defined_by 2)
+                let defined_by = node_defined_by(p.arena, kid)
+                if defined_by == 2 {
+                    return ParseError(p.c.line, p.c.col, "array of tables conflicts")
+                }
+                // It's an array of tables — return its last element (must be a table)
                 let nkids = node_kid_len(p.arena, kid)
                 if nkids == 0 {
                     return ParseError(p.c.line, p.c.col, "key already defined")
@@ -578,7 +588,8 @@ fn find_child(arena: List[Node], parent: int, key: str) -> int ! {ParseError(int
 }
 
 /// Decide whether a key may be defined in parent, and why not.
-/// how: 1 dotted-key descent, 2 inline-table key, 3 [header], 4 [[header]], 5 plain key=value.
+/// how: 1 dotted-key descent, 2 inline-table key, 3 [header], 4 [[header]], 5 plain key=value,
+/// 6 header intermediate segment (may descend through arrays of tables).
 fn may_define(p: Parser, parent: int, key: str, how: int) -> () ! {ParseError(int, int, str)} {
     let kid = find_child(p.arena, parent, key) else -1
     if kid < 0 {
@@ -626,18 +637,22 @@ fn may_define(p: Parser, parent: int, key: str, how: int) -> () ! {ParseError(in
             // It's an array of tables — allowed for appending
             return
         }
-        // how 1 (dotted descent), 2 (inline) into an array: check if array of tables
-        let nkids = node_kid_len(p.arena, kid)
-        if nkids == 0 {
-            return ParseError(p.c.line, p.c.col, "key already defined")
+        // how 6 (header intermediate) into an array: check if array of tables
+        if how == 6 {
+            let nkids = node_kid_len(p.arena, kid)
+            if nkids == 0 {
+                return ParseError(p.c.line, p.c.col, "key already defined")
+            }
+            let first = node_kid_at(p.arena, kid, 0)
+            let first_kind = node_kind(p.arena, first)
+            if first_kind != 0 {
+                return ParseError(p.c.line, p.c.col, "key already defined")
+            }
+            // It's an array of tables — allowed for descent
+            return
         }
-        let first = node_kid_at(p.arena, kid, 0)
-        let first_kind = node_kind(p.arena, first)
-        if first_kind != 0 {
-            return ParseError(p.c.line, p.c.col, "key already defined")
-        }
-        // It's an array of tables — allowed for descent
-        return
+        // how 1 (dotted descent), 2 (inline) into an array: refuse
+        return ParseError(p.c.line, p.c.col, "key already defined")
     }
     // The key holds a table
     if kind == 0 {
