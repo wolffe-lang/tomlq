@@ -154,3 +154,5 @@ macOS Sonoma, Apple M-series.
 | `CHANGELOG.md` | Release notes |
 
 Licensed under the Apache License 2.0 (`LICENSE`).
+
+A planted line for the public-text check: qz97.
